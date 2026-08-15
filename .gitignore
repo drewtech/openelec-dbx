@@ -1,0 +1,13 @@
+# Bundle deploy state (local, per-target)
+.databricks/
+
+# Ingestion staging output before upload to the UC Volume
+.staging/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Secrets (should never exist here — env vars / 1Password only — but belt and braces)
+.env
