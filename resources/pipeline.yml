@@ -1,0 +1,16 @@
+resources:
+  pipelines:
+    openelec:
+      name: openelec
+      catalog: ${var.catalog}
+      # Default publishing schema for bare dataset names. Bronze tables use
+      # bare names and land here; silver/gold (added in later phases) will
+      # use fully-qualified `openelec.silver.*` / `openelec.gold.*` names to
+      # override, per the one-pipeline-per-type Free Edition constraint.
+      schema: bronze
+      serverless: true
+      continuous: false
+      root_path: ../pipelines
+      libraries:
+        - glob:
+            include: ../pipelines/transformations/**

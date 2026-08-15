@@ -10,7 +10,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | Phase | State | Notes |
 |---|---|---|
 | 0 — Foundation | ✅ Done | Bundle deployed, catalog/schemas/volume created, egress test complete — see finding below. |
-| 1 — Bronze | ⬜ Not started | |
+| 1 — Bronze | 🔄 In progress | 1a (bucket backfill) + bronze tables done and verified. 1b (API incremental, scheduled) not started. |
 | 2 — Silver | ⬜ Not started | |
 | 3 — Gold | ⬜ Not started | |
 | 4 — Orchestration | ⬜ Not started | |
@@ -179,25 +179,37 @@ lives in the Databricks `openelec` secret scope, populated once from 1Password.
 Two sub-steps, both running **in-workspace** as notebook-task job runs (Phase 0 finding).
 **1a needs no API key** — get it green before starting 1b.
 
-### 1a — Bucket backfill (no auth)
+### 1a — Bucket backfill (no auth) — ✅ done
 
-- [ ] `ingestion/fetch_bucket.py` — Databricks-notebook-formatted (`# Databricks
+- [x] `ingestion/fetch_bucket.py` — Databricks-notebook-formatted (`# Databricks
       notebook source` header), plain `requests`, no key:
-  - `facilities` → `v4/facilities/au_facilities.json` (1.4 MB, one GET).
+  - `facilities` → `v4/facilities/au_facilities.json` — landed, 1 file, 1.39 MB.
   - `stats` → `v4/stats/au/NEM/{REGION}/energy/{YYYY}.json` for 1999–2026 × 5 NEM
-    regions. ~150 files, ~15 MB total — the entire 28-year backfill in one run, with no
-    quota risk.
-  - `power` → `v4/stats/au/NEM/power/7d.json` for the rolling 5-minute window.
+    regions — **134/140 landed**, 6 failed (expected: some regions don't have data for
+    every year, e.g. early history gaps). Not investigated further; acceptable loss.
+  - `power` — **dropped from scope**: nothing in Phase 2/3 consumes it yet. Add back
+    when a consumer exists rather than fetch unused data.
   - Writes verbatim `response.content` directly to
     `/Volumes/openelec/bronze/raw/<source>/<partition>/fetched_at=<iso>/part-NNN.json`
-    via plain `open(path, "wb").write(...)` — Volumes are directly writable as file
-    paths from job/notebook code, no separate upload step. No parsing.
-- [ ] Run once, ad hoc, via `databricks workspace import` + `databricks jobs submit`
-      (the same pattern proven in the Phase 0 egress test) — **not** a bundled/scheduled
-      resource. This is a one-time backfill; bundling it as a recurring job resource
-      would be the same over-management `setup.sql` already avoids for one-time DDL.
+    via plain `open(path, "wb").write(...)` — confirmed Volumes are directly writable as
+    file paths from job/notebook code, no separate upload step needed.
+- [x] Run once, ad hoc, via `databricks jobs submit` against the notebook path that
+      `bundle deploy` itself already synced (bundle sync uploads any `.py` file with the
+      `# Databricks notebook source` header as a `NOTEBOOK` object automatically — no
+      separate `workspace import` needed, and skill guidance warns against mixing manual
+      `workspace import` with bundle-managed sync for the same path anyway).
 
-### 1b — API incremental (keyed)
+> **Finding:** the bucket's `au_facilities.json` top-level shape differs from the API
+> registry endpoint assumed in research — `{"success": true, "data": [...]}`, no
+> `version`/`created_at` keys. The `stats/*.json` shape matches research closely
+> (`type`, `version`, `network`, `region`, `data[].id/fuel_tech/history.{start,last,
+> interval,data[]}`). Also: the stats response embeds a live deprecation notice —
+> `"OpenNEM API has migrated to require authentication"` — worth treating as an
+> early-warning signal that this undocumented bucket route could eventually require a
+> key too. Use the confirmed shapes above (not the original research's assumed
+> facilities shape) when writing `utils/schemas.py` in Phase 2.
+
+### 1b — API incremental (keyed) — not started
 
 - [ ] `ingestion/fetch_api.py` — same notebook-task shape, key via
       `dbutils.secrets.get(scope="openelec", key="api_key")` (scope already created and
@@ -206,37 +218,42 @@ Two sub-steps, both running **in-workspace** as notebook-task job runs (Phase 0 
       short `5m` window for recency. Logs `rate_limit.remaining`; backs off on 429.
 - [ ] This **is** a bundled, scheduled job resource — see Phase 4.
 
-### Bronze tables
+### Bronze tables — ✅ done
 
-- [ ] `pipelines/transformations/bronze.py` — one streaming table per source, one row
-      per file, JSON preserved as text:
+- [x] `pipelines/transformations/bronze.py` — one streaming table per source
+      (`facilities_raw`, `stats_energy_raw`), one row per file, JSON preserved as text
+      via Auto Loader:
 
 ```python
 @dp.table(name="stats_energy_raw", comment="Verbatim OpenElectricity static-bucket responses.")
 def stats_energy_raw():
     return (spark.readStream.format("cloudFiles")
-        .option("cloudFiles.format", "text").option("wholetext", "true")
+        .option("cloudFiles.format", "text").option("wholeText", "true")
         .load("/Volumes/openelec/bronze/raw/stats")
-        .select("value",
+        .select(F.col("value").alias("raw_json"),
                 F.col("_metadata.file_path").alias("source_file"),
                 F.col("_metadata.file_modification_time").alias("ingested_at")))
 ```
 
-Text + `wholetext` keeps payloads byte-faithful and hands schema ownership to silver's
-explicit `from_json` — important because both sources nest awkwardly for JSON inference
-(the API uses positional `[ts, value]` pairs; the bucket uses flat arrays keyed off
-`start` + `interval`). **Verify `wholetext` behaves under `cloudFiles` on first run; if
-not, fall back to `cloudFiles.format = "binaryFile"` + `decode(content)`.**
+Text + `wholeText` (confirmed correct casing — camelCase, per the live pipelines skill
+reference, not `wholetext`) keeps payloads byte-faithful and hands schema ownership to
+silver's explicit `from_json` — important because both sources nest awkwardly for JSON
+inference (the API uses positional `[ts, value]` pairs; the bucket uses flat arrays keyed
+off `start` + `interval`). **Confirmed working on first run** — no `binaryFile` fallback
+needed.
 
-- [ ] `resources/pipeline.yml`: `serverless: true`, `catalog: openelec`,
+- [x] `resources/pipeline.yml`: `serverless: true`, `catalog: ${var.catalog}`,
       `schema: bronze`, `root_path: ../pipelines`,
-      `libraries: [{glob: {include: ../pipelines/transformations/**}}]`. Omit
+      `libraries: [{glob: {include: ../pipelines/transformations/**}}]`. Omitted
       `photon`/`edition`/`clusters` — classic-compute concepts, undefined under
-      serverless. Use `schema:`, not the deprecated `target:` (confirmed live via
+      serverless. Used `schema:`, not the deprecated `target:` (confirmed live via
       `databricks bundle schema` — `target` is explicitly marked legacy/deprecated).
+      Silver/gold tables (Phase 2/3) will use fully-qualified `openelec.silver.*` /
+      `openelec.gold.*` names to publish outside this pipeline's default `bronze` schema.
 
-**Verify:** files under the Volume; pipeline green; `count(*)` on each bronze table;
-spot-check one `value` parses as JSON.
+**Verify:** ✅ files under the Volume (135 total) → pipeline update `COMPLETED` on first
+run → `count(*)`: `facilities_raw`=1, `stats_energy_raw`=134, matching files landed
+exactly → spot-checked `raw_json` parses and matches the source API/bucket shape.
 
 ---
 
