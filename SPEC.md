@@ -9,7 +9,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 
 | Phase | State | Notes |
 |---|---|---|
-| 0 — Foundation | 🔄 In progress | `databricks.yml` + `setup.sql` written, `bundle validate --strict` passing. Deploy, DDL execution, and egress test still pending. |
+| 0 — Foundation | ✅ Done | Bundle deployed, catalog/schemas/volume created, egress test complete — see finding below. |
 | 1 — Bronze | ⬜ Not started | |
 | 2 — Silver | ⬜ Not started | |
 | 3 — Gold | ⬜ Not started | |
@@ -27,12 +27,9 @@ Dashboard and Genie come after and are out of scope here.
 
 Three research findings drive the design:
 
-1. **Free Edition serverless has no outbound internet.** It is a DNS-level account
-   allowlist, not a firewall quirk — arbitrary calls fail with `[Errno -3] Temporary
-   failure in name resolution`. PyPI is allowlisted; OpenElectricity is not. So
-   **ingestion runs locally** and lands raw JSON into a UC Volume; Databricks does
-   transform/serve only. (LinkedIn identity verification reportedly unlocks egress, but
-   nobody has published what it actually permits — not worth blocking on.)
+1. ~~Free Edition serverless has no outbound internet.~~ **Superseded by empirical test —
+   see below.** Community reports describe a DNS-level allowlist blocking arbitrary
+   outbound calls; that premise does **not** hold for this workspace.
 2. **There is a bulk path, and it beats the API for backfill.**
    `data.openelectricity.org.au` is a live, unauthenticated static JSON bucket — the one
    OpenElectricity's own frontend consumes. Full history back to 1998-12, no key, no rate
@@ -42,9 +39,24 @@ Three research findings drive the design:
    either — `@dp.materialized_view` is the MV. A mechanical rename silently converts MVs
    into streaming tables.
 
-Decisions made: local fetch → Volume; NEM only; dedicated `openelec` catalog with
-`bronze`/`silver`/`gold` schemas; hybrid sourcing (bucket for backfill, API for
-incremental); no AEMO price/demand in this scope.
+> **✅ Finding #1, resolved (Phase 0 egress check):** a one-off serverless job notebook
+> (`databricks jobs submit`) successfully reached both `api.openelectricity.org.au`
+> (401, no key sent — a real HTTP response, not a DNS failure) and
+> `data.openelectricity.org.au` (200). Community reports of a DNS-level block may be
+> stale, region/tenant-specific, or this account already carries the LinkedIn-verification
+> unlock — cause unconfirmed, but the effect is clear for this workspace. **Decision:**
+> redesign ingestion to run **in-workspace** as scheduled job tasks rather than a local
+> script + `dbx fs cp` upload. More idiomatic (a job doing the whole fetch→land step
+> exercises more of the Databricks surface the project exists to learn) and collapses
+> the local/GitHub-Actions automation question out of Phase 4 entirely. Also verified as
+> part of this decision: Databricks secret scopes work on Free Edition (`databricks
+> secrets create-scope` succeeded) — the `openelec` scope now holds `api_key`, sourced
+> from the same 1Password item as before.
+
+Decisions made: in-workspace fetch → Volume (via scheduled job tasks, not a local
+script); NEM only; dedicated `openelec` catalog with `bronze`/`silver`/`gold` schemas;
+hybrid sourcing (bucket for backfill, API for incremental); no AEMO price/demand in this
+scope.
 
 ## Sources and their grains — the load-bearing distinction
 
@@ -88,6 +100,18 @@ tables, deliberately, rather than one forced grain.
   (plus `jobs`, `pipelines`, `unity-catalog`, `sql`) explicitly checked, or `all-apis`, or
   bundle deploy 403s with "does not have required scopes: workspace". Leave "Auto-scope
   tokens" off for a deploy token — it narrows itself post-observation.
+- **Ingestion runs in-workspace, as job tasks.** Fetch scripts write straight to
+  `/Volumes/openelec/bronze/raw/...` — no local `.staging/` hop, no `dbx fs cp`. Use
+  `notebook_task` (not `spark_python_task`) for these: `dbutils.secrets.get()` and
+  `dbutils.notebook.exit()` are both proven working in this exact shape from the Phase 0
+  egress test, so standardize on it rather than introduce an unverified task type.
+  Job-serverless environments need `requests`/`httpx` declared as a dependency
+  (`environments: [{spec: {client: "4", dependencies: [...]}}]` — `client: "4"` is
+  required for dependencies to install at all, confirmed working in Phase 0).
+- **The API key lives in a Databricks secret scope now, not just 1Password.** Scope
+  `openelec`, key `api_key` — created via `databricks secrets create-scope openelec` /
+  `put-secret`, both confirmed working on Free Edition. Read it in ingestion notebooks
+  via `dbutils.secrets.get(scope="openelec", key="api_key")`.
 
 ## Target layout
 
@@ -103,11 +127,14 @@ pipelines/
   utils/
     fueltech.py  schemas.py          # importable via root_path on sys.path
 ingestion/
-  fetch_bucket.py                    # no auth, backfill
-  fetch_api.py                       # keyed, incremental
+  fetch_bucket.py                    # no auth, one-time backfill, run ad hoc
+  fetch_api.py                       # keyed, incremental, scheduled via resources/job.yml
   README.md
-.env.example
 ```
+
+Both `ingestion/*.py` files run **in-workspace** (job/notebook tasks), not locally —
+see Phase 0's egress finding. No `.env`/`.env.1password` needed in-repo: the API key
+lives in the Databricks `openelec` secret scope, populated once from 1Password.
 
 ---
 
@@ -129,12 +156,18 @@ ingestion/
     one-time DDL. The bundle owns pipeline + job — the things that actually change.
 - [x] `bundle validate --strict` passes (hit and fixed a real blocker: the stored PAT
       lacked the `workspace` scope — regenerated with `all-apis`).
-- [ ] `bundle deploy` to `dev`.
-- [ ] Run `setup.sql` against the SQL warehouse; confirm `SHOW SCHEMAS IN openelec`
-      lists all three.
-- [ ] Settle egress empirically, in a scratch notebook: `requests.get(...)` against both
-      `api.openelectricity.org.au` and `data.openelectricity.org.au`. `Errno -3` on both
-      confirms the local-ingest design; anything else is a bonus worth redesigning for.
+- [x] `bundle deploy` to `dev`.
+- [x] Run `setup.sql` against the SQL warehouse; confirmed `SHOW SCHEMAS IN openelec`
+      lists `bronze`/`silver`/`gold`/`default`/`information_schema`, and
+      `SHOW VOLUMES IN openelec.bronze` lists `raw`.
+- [x] Settle egress empirically, via a one-off serverless job notebook
+      (`databricks jobs submit`): `requests.get(...)` against both
+      `api.openelectricity.org.au` (→ 401, no key sent) and
+      `data.openelectricity.org.au` (→ 200). **Both reachable — the DNS-block premise
+      does not hold here.** Resolved to in-workspace ingestion — see Finding #1 above.
+- [x] Create `openelec` Databricks secret scope and populate `api_key` from 1Password —
+      both confirmed working on Free Edition (this was an open question in the original
+      research; now verified).
 
 **Verify:** `dbx bundle validate` clean → `dbx bundle deploy` → `dbx bundle summary`;
 `SHOW SCHEMAS IN openelec` lists all three.
@@ -143,29 +176,35 @@ ingestion/
 
 ## Phase 1 — Bronze
 
-Two sub-steps. **1a is independently deployable and needs no API key** — get it green
-before starting 1b.
+Two sub-steps, both running **in-workspace** as notebook-task job runs (Phase 0 finding).
+**1a needs no API key** — get it green before starting 1b.
 
 ### 1a — Bucket backfill (no auth)
 
-- [ ] `ingestion/fetch_bucket.py`, plain `httpx`, no key:
+- [ ] `ingestion/fetch_bucket.py` — Databricks-notebook-formatted (`# Databricks
+      notebook source` header), plain `requests`, no key:
   - `facilities` → `v4/facilities/au_facilities.json` (1.4 MB, one GET).
   - `stats` → `v4/stats/au/NEM/{REGION}/energy/{YYYY}.json` for 1999–2026 × 5 NEM
     regions. ~150 files, ~15 MB total — the entire 28-year backfill in one run, with no
     quota risk.
   - `power` → `v4/stats/au/NEM/power/7d.json` for the rolling 5-minute window.
-  - Writes verbatim `response.text` to
-    `.staging/<source>/<partition>/fetched_at=<iso>/part-NNN.json`. No parsing.
-- [ ] Upload via the existing auth path: `dbx fs cp -r .staging/ /Volumes/openelec/bronze/raw/`.
+  - Writes verbatim `response.content` directly to
+    `/Volumes/openelec/bronze/raw/<source>/<partition>/fetched_at=<iso>/part-NNN.json`
+    via plain `open(path, "wb").write(...)` — Volumes are directly writable as file
+    paths from job/notebook code, no separate upload step. No parsing.
+- [ ] Run once, ad hoc, via `databricks workspace import` + `databricks jobs submit`
+      (the same pattern proven in the Phase 0 egress test) — **not** a bundled/scheduled
+      resource. This is a one-time backfill; bundling it as a recurring job resource
+      would be the same over-management `setup.sql` already avoids for one-time DDL.
 
 ### 1b — API incremental (keyed)
 
-- [ ] `ingestion/fetch_api.py` — same raw-`httpx` discipline, `OPENELECTRICITY_API_KEY`
-      from env. Key already in 1Password (vault `Dev`, item
-      `7vlh7nkxgesxzkk6rfocdyrx7a`), wired into the generic `dbx`-style env-file lookup.
-      Chunks facility codes in 30s and date ranges per interval cap. Default: trailing
-      window at `1d`, plus a short `5m` window for recency. Logs `rate_limit.remaining`;
-      backs off on 429.
+- [ ] `ingestion/fetch_api.py` — same notebook-task shape, key via
+      `dbutils.secrets.get(scope="openelec", key="api_key")` (scope already created and
+      populated, sourced from the same 1Password item as before). Chunks facility codes
+      in 30s and date ranges per interval cap. Default: trailing window at `1d`, plus a
+      short `5m` window for recency. Logs `rate_limit.remaining`; backs off on 429.
+- [ ] This **is** a bundled, scheduled job resource — see Phase 4.
 
 ### Bronze tables
 
@@ -254,17 +293,18 @@ share trends up strongly post-2015; SA1 wind share is high; no date gaps in dail
 
 ## Phase 4 — Orchestration
 
-- [ ] `resources/job.yml`: one task, `pipeline_task` referencing
-      `${resources.pipelines.openelec.id}`, daily `quartz_cron_expression`. No cluster
-      key — serverless is implied by omission.
-- [ ] Decide and implement the ingestion-automation tier (manual → local cron → GitHub
-      Actions). GitHub Actions is the natural fit long-term: egress, holds both secrets,
-      can `databricks fs cp`.
+Now that ingestion runs in-workspace too (Phase 0 finding), the whole thing schedules
+together in one bundled job — no separate local cron / GitHub Actions tier needed.
 
-**The asymmetry is unavoidable and worth stating plainly:** the *pipeline* can be
-scheduled in Databricks, but *ingestion cannot* — no egress. The backfill is a
-**one-time** run; only the rolling 5-minute and recent-API windows need recurring
-fetches, which keeps the automation surface small.
+- [ ] `resources/job.yml`, two tasks in one job:
+  1. `fetch_api_incremental` — `notebook_task` running `ingestion/fetch_api.py`, no
+     cluster key (serverless), `environment_key` pointing at a `client: "4"` spec with
+     `requests` as a dependency.
+  2. `refresh_pipeline` — `pipeline_task` referencing
+     `${resources.pipelines.openelec.id}`, `depends_on: [fetch_api_incremental]`.
+  Daily `quartz_cron_expression` on the job (not per-task).
+- [ ] Confirm the one-time `fetch_bucket.py` backfill (Phase 1a) stays **out** of this
+      bundled job — run once, ad hoc, not on the recurring schedule.
 
 Guardrails, since blowing the fair-usage quota costs a full day of workspace compute (no
 published DBU numbers exist): keep SQL warehouse auto-stop tight — one idling 2X-Small
@@ -290,8 +330,7 @@ Loader CSV exercise to complement the JSON path.
 
 ## Global verification
 
-End to end from clean: `dbx bundle validate` → `dbx bundle deploy` →
-`python ingestion/fetch_bucket.py facilities stats` → `dbx fs cp` → trigger the pipeline →
-confirm row counts at all three layers → the gold marts should answer "what was the
-renewable share in SA1 in 2010 versus 2025?" correctly, which the API-only design could
-not have answered at all.
+End to end from clean: `dbx bundle validate` → `dbx bundle deploy` → run
+`fetch_bucket.py` once (ad hoc, in-workspace) → trigger the pipeline → confirm row counts
+at all three layers → the gold marts should answer "what was the renewable share in SA1
+in 2010 versus 2025?" correctly, which the API-only design could not have answered at all.
