@@ -10,7 +10,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | Phase | State | Notes |
 |---|---|---|
 | 0 — Foundation | ✅ Done | Bundle deployed, catalog/schemas/volume created, egress test complete — see finding below. |
-| 1 — Bronze | 🔄 In progress | 1a (bucket backfill) + bronze tables done and verified. 1b (API incremental, scheduled) not started. |
+| 1 — Bronze | 🔄 In progress | 1a (bucket backfill) + bronze tables done and verified. 1b (API incremental) written but blocked — API key returns 401 everywhere, waiting on user to regenerate. |
 | 2 — Silver | ⬜ Not started | |
 | 3 — Gold | ⬜ Not started | |
 | 4 — Orchestration | ⬜ Not started | |
@@ -209,14 +209,25 @@ Two sub-steps, both running **in-workspace** as notebook-task job runs (Phase 0 
 > key too. Use the confirmed shapes above (not the original research's assumed
 > facilities shape) when writing `utils/schemas.py` in Phase 2.
 
-### 1b — API incremental (keyed) — not started
+### 1b — API incremental (keyed) — 🚧 blocked on a bad API key
 
-- [ ] `ingestion/fetch_api.py` — same notebook-task shape, key via
-      `dbutils.secrets.get(scope="openelec", key="api_key")` (scope already created and
-      populated, sourced from the same 1Password item as before). Chunks facility codes
-      in 30s and date ranges per interval cap. Default: trailing window at `1d`, plus a
-      short `5m` window for recency. Logs `rate_limit.remaining`; backs off on 429.
-- [ ] This **is** a bundled, scheduled job resource — see Phase 4.
+- [x] `ingestion/fetch_api.py` written and deployed: notebook-task shape, key via
+      `dbutils.secrets.get(scope="openelec", key="api_key")`. Facility codes sourced from
+      the already-landed `openelec.bronze.facilities_raw` (one fewer keyed call, same
+      codes) rather than a separate registry fetch. Chunks in 30s, fetches both `1d`
+      (366-day lookback) and `5m` (7-day lookback) windows per chunk. Logs
+      `rate_limit.remaining` from `/v4/me`; backs off on 429.
+- [ ] **Blocked:** test run completed but `1d=0 5m=0 failed=38` — every request 401'd.
+      Root-caused via local repro (bypassing Databricks entirely) to the key itself, not
+      the code: `Authorization: Bearer <key>` fails on `/v4/me`, `/v4/facilities/`, *and*
+      `/v4/data/facilities/NEM` alike — a blanket auth rejection, not an endpoint/scope
+      issue. Verified the key is transmitted intact (byte-for-byte hex dump, no
+      whitespace/truncation) and the header format matches documented usage, and that
+      `X-API-Key` also fails — ruling out a header-scheme guess. The 1Password item was
+      created the same day as this test; likely needs regeneration/activation on
+      platform.openelectricity.org.au. **Waiting on the user to check/regenerate.**
+- [ ] This **is** a bundled, scheduled job resource — see Phase 4. Not wired in yet;
+      finish testing 1b standalone first.
 
 ### Bronze tables — ✅ done
 
