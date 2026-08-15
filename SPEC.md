@@ -242,8 +242,8 @@ Two sub-steps, both running **in-workspace** as notebook-task job runs (Phase 0 
 ### Bronze tables — ✅ done
 
 - [x] `pipelines/transformations/bronze.py` — one streaming table per source
-      (`facilities_raw`, `stats_energy_raw`), one row per file, JSON preserved as text
-      via Auto Loader:
+      (`facilities_raw`, `stats_energy_raw`, `facility_data_raw` — the last added after
+      1b landed its own files), one row per file, JSON preserved as text via Auto Loader:
 
 ```python
 @dp.table(name="stats_energy_raw", comment="Verbatim OpenElectricity static-bucket responses.")
@@ -272,9 +272,18 @@ needed.
       Silver/gold tables (Phase 2/3) will use fully-qualified `openelec.silver.*` /
       `openelec.gold.*` names to publish outside this pipeline's default `bronze` schema.
 
-**Verify:** ✅ files under the Volume (135 total) → pipeline update `COMPLETED` on first
-run → `count(*)`: `facilities_raw`=1, `stats_energy_raw`=134, matching files landed
-exactly → spot-checked `raw_json` parses and matches the source API/bucket shape.
+**Verify:** ✅ files under the Volume (171 total: 135 bucket + 36 API) → pipeline updates
+`COMPLETED` → `count(*)`: `facilities_raw`=1, `stats_energy_raw`=134,
+`facility_data_raw`=36, all matching files landed exactly → spot-checked `raw_json`
+parses and matches the source API/bucket shape.
+
+> **Note:** a later update on this pipeline sat in `CREATED` for ~7 minutes before
+> progressing — genuine serverless cold-start (compute had spun down after ~25 min idle
+> since the prior run), not a stuck/failed update. `databricks pipelines get-update`
+> reported the coarse state; `databricks pipelines get` (top-level, `latest_updates[]`)
+> and `list-pipeline-events` showed the same delay more legibly. If a bundle-run poll
+> looks stuck, check events before assuming failure — matches the skill's own guidance
+> that serverless `INITIALIZING` cold starts are normal and shouldn't be killed.
 
 ---
 
