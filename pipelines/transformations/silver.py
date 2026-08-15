@@ -100,12 +100,18 @@ def _facility_generation_points():
         "ingested_at",
         F.col("block.metric").alias("metric"),
         F.col("block.unit").alias("uom"),
+        # Retained: this table mixes rows from two fetch windows (1d over 366
+        # days, 5m over 7 days) which overlap in their last 7 days. Without
+        # `interval`, a daily gold aggregation would double-count that
+        # overlap -- always filter to interval='1d' for daily-grain marts.
+        F.col("block.interval").alias("interval"),
         F.explode("block.results").alias("result"),
     )
     per_point = per_unit.select(
         "ingested_at",
         "metric",
         "uom",
+        "interval",
         F.col("result.columns.unit_code").alias("unit_code"),
         F.explode("result.data").alias("pair"),
     )
@@ -113,6 +119,7 @@ def _facility_generation_points():
         "unit_code",
         F.col("pair")[0].cast("timestamp").alias("interval_ts_utc"),
         "metric",
+        "interval",
         F.col("pair")[1].cast("double").alias("value"),  # null = no data, never 0
         "uom",
         "ingested_at",

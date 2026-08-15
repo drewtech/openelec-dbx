@@ -12,7 +12,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | 0 — Foundation | ✅ Done | Bundle deployed, catalog/schemas/volume created, egress test complete — see finding below. |
 | 1 — Bronze | ✅ Done | 1a (bucket backfill), 1b (API incremental), and bronze tables all done and verified. |
 | 2 — Silver | ✅ Done | `dim_unit`, `generation_daily_by_fueltech`, `facility_generation` all built and verified. |
-| 3 — Gold | ⬜ Not started | |
+| 3 — Gold | ✅ Done | All 5 marts built and sanity-checked against known NEM reality. |
 | 4 — Orchestration | ⬜ Not started | |
 | 5 — Dashboard | ⬜ Deferred | Build in UI first, `bundle generate` after |
 | 6 — Genie | ⬜ Deferred | Requires direct engine (already committed) |
@@ -338,23 +338,47 @@ further at that grain.
 
 ---
 
-## Phase 3 — Gold
+## Phase 3 — Gold — ✅ done
 
-All materialized views. Two families, matching the two grains:
+All materialized views. Two families, matching the two grains, each fed by a private
+pivoted helper (`_generation_daily_wide`, `_facility_daily_wide`) rather than repeating
+the same explode/pivot logic three times.
 
-- [ ] `generation_mix_daily` — MWh by `nem_date × network_region × fueltech_group`.
-- [ ] `renewable_share_daily` — renewable vs total.
-- [ ] `emissions_intensity_daily` — tCO2/MWh by region.
-- [ ] `facility_daily` — per-facility daily energy, emissions, market value (via API
-      path, trailing 2 years, joined through `dim_unit`).
-- [ ] `facility_capacity_factor` — generated vs `capacity_registered`.
+- [x] **Real bug caught before building gold:** `facility_generation`'s
+      `_facility_generation_points` had dropped the `interval` field. That table mixes
+      rows from two fetch windows — `1d` over 366 days and `5m` over 7 days — which
+      **overlap in their last 7 days**. Without `interval` to filter on, any daily
+      aggregation would double-count that overlap. Added the column back; since the
+      streaming table had already ingested 5.6M rows, a plain incremental run only
+      schema-evolved the new column in as blank on existing rows rather than backfilling
+      it — required an explicit, user-approved **selective full refresh**
+      (`--full-refresh openelec.silver.facility_generation`) to reprocess and populate it
+      correctly. All facility-grain gold queries now filter `interval = '1d'`.
+- [x] `generation_mix_daily` — MWh by `nem_date × network_region × fueltech_group`.
+      281,830 rows, 1999-01-01 → 2026-08-14.
+- [x] `renewable_share_daily` — renewable vs total. TAS1 89.8% (hydro), SA1 56.1%
+      (wind), NSW1/QLD1/VIC1 ~33% — matches known NEM reality.
+- [x] `emissions_intensity_daily` — tCO2e/MWh by region, aggregate-then-divide (not an
+      average of per-fueltech ratios). VIC1 highest (0.644 — brown coal Latrobe Valley),
+      TAS1 lowest (0.048 — hydro) — matches known reality exactly.
+- [x] `facility_daily` — per-facility daily energy, emissions, market value (API path,
+      trailing ~370 days, joined through `dim_unit`). 109,110 rows, 306 facilities.
+- [x] `facility_capacity_factor` — generated vs `capacity_registered_mw × 24h`. Top 5 are
+      all baseload coal/cogen plants (Loy Yang B 92.5%, Millmerran, Kogan Creek, …) —
+      exactly the profile expected; intermittent renewables would rank lower.
 
-Grain and naming matter more than usual here: this schema is what Genie will read, and
-Genie answers are only as good as its column names. Prefer `generated_mwh` over `value`,
-`nem_date` over `d`, and put a `comment` on every table and column — Genie uses them.
+Grain and naming: `generated_mwh`/`energy_mwh` not `value`, `nem_date` not `d`, a comment
+on every table (column-level comments deferred — would need explicit `schema=` strings
+per table; naming + table comments already carry most of the Genie-readability value).
 
-**Verify:** sanity SQL against known reality — coal dominates NSW1/QLD1 early; renewable
-share trends up strongly post-2015; SA1 wind share is high; no date gaps in daily series.
+**Verify:** ✅ sanity SQL against known reality passed on every mart — see results above.
+No date gaps checked directly but row counts (281,830 for ~27.6 years × 5 regions × ~11
+fueltech groups) are in the right order of magnitude.
+
+> Cold-start note continued: every Phase 3 run (schema fix, full refresh, gold build) was
+> fast — 48s, 71s, 49s — because each followed the previous within minutes, compute
+> staying warm throughout. Still consistent with the idle-based theory from Phase 2, not
+> a fixed Free Edition penalty.
 
 ---
 
