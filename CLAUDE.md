@@ -53,6 +53,12 @@ as edge cases:
 - No custom/classic compute clusters.
 - Exceeding the fair-usage quota shuts the workspace down for the rest of the day
   (sometimes the month) — avoid heavy backfills or unattended loops.
+- Serverless pipeline/job cold-start is variable, not fixed — observed 25s to ~7min
+  depending on how recently compute was used (idle compute spins down and needs to be
+  re-provisioned). A long `CREATED`/`WAITING_FOR_RESOURCES` wait isn't necessarily stuck;
+  check `databricks pipelines list-pipeline-events` (or job run state) before assuming
+  failure — `pipelines get-update` alone can look stale. See SPEC.md Phase 2/4 for the
+  data points this is based on.
 
 ## Repo conventions
 

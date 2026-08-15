@@ -13,7 +13,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | 1 — Bronze | ✅ Done | 1a (bucket backfill), 1b (API incremental), and bronze tables all done and verified. |
 | 2 — Silver | ✅ Done | `dim_unit`, `generation_daily_by_fueltech`, `facility_generation` all built and verified. |
 | 3 — Gold | ✅ Done | All 5 marts built and sanity-checked against known NEM reality. |
-| 4 — Orchestration | ⬜ Not started | |
+| 4 — Orchestration | ✅ Done | Job deployed, manually tested end-to-end (fetch → pipeline refresh), left paused. |
 | 5 — Dashboard | ⬜ Deferred | Build in UI first, `bundle generate` after |
 | 6 — Genie | ⬜ Deferred | Requires direct engine (already committed) |
 
@@ -382,20 +382,35 @@ fueltech groups) are in the right order of magnitude.
 
 ---
 
-## Phase 4 — Orchestration
+## Phase 4 — Orchestration — ✅ done
 
 Now that ingestion runs in-workspace too (Phase 0 finding), the whole thing schedules
 together in one bundled job — no separate local cron / GitHub Actions tier needed.
 
-- [ ] `resources/job.yml`, two tasks in one job:
+- [x] `resources/job.yml`, two tasks in one job (`openelec_refresh`):
   1. `fetch_api_incremental` — `notebook_task` running `ingestion/fetch_api.py`, no
      cluster key (serverless), `environment_key` pointing at a `client: "4"` spec with
      `requests` as a dependency.
   2. `refresh_pipeline` — `pipeline_task` referencing
      `${resources.pipelines.openelec.id}`, `depends_on: [fetch_api_incremental]`.
-  Daily `quartz_cron_expression` on the job (not per-task).
-- [ ] Confirm the one-time `fetch_bucket.py` backfill (Phase 1a) stays **out** of this
-      bundled job — run once, ad hoc, not on the recurring schedule.
+  **Switched from cron to `trigger.periodic`** (`interval: 1, unit: DAYS`) per the current
+  jobs skill's own guidance: prefer periodic over cron for a plain fixed cadence with no
+  need to pin a clock time — cron is for when a specific time-of-day/day-of-week matters,
+  which doesn't apply here.
+- [x] **Real bug caught at validate time:** used `openelec` as the job's resource key
+      (mirroring the pipeline's key) — bundle validate rejected it: resource keys must be
+      unique **across all resource types**, not just within one type. Renamed to
+      `openelec_refresh`.
+- [x] `fetch_bucket.py` (Phase 1a) confirmed **not** part of this bundled job — it was
+      never added as a job resource, run only ad hoc, exactly as planned.
+- [x] **Deliberately deployed paused** (`trigger.pause_status: PAUSED`) — no reason to
+      spend fair-usage quota on a live daily schedule while still actively iterating.
+      Flip to `UNPAUSED` when ready to run unattended.
+- [x] Manually tested end-to-end via `bundle run openelec_refresh`: both tasks
+      `TERMINATED`/`SUCCESS`. Confirmed it was real work, not a no-op — bronze grew
+      36→72 rows, silver CDC-merged the new points (5,649,344→5,682,048, freshest point
+      minutes old), gold correctly **unchanged** (no new calendar day has closed yet, and
+      gold only aggregates `interval='1d'` rows) — exactly the expected behavior.
 
 Guardrails, since blowing the fair-usage quota costs a full day of workspace compute (no
 published DBU numbers exist): keep SQL warehouse auto-stop tight — one idling 2X-Small
@@ -403,8 +418,14 @@ outweighs the job itself — don't leave interactive notebooks attached, and sta
 concurrent tasks and 1 active pipeline. Design the pipeline to backfill gaps on the next
 successful run rather than assuming every tick fires.
 
-**Verify:** trigger the job manually, confirm a green pipeline update; check the schedule
-registered — and note `mode: development` pauses schedules, so unpause deliberately.
+**Verify:** ✅ triggered manually, both tasks succeeded, data flow confirmed real (not
+cached/no-op) at every layer. Schedule is registered but paused — unpause when ready.
+
+> Cold-start note, final data point: the job's first-ever run took 422s total — longer
+> than any pipeline-only run, because it stacked **two** separate cold starts (job
+> compute, then pipeline compute) sequentially, on top of the actual fetch work (~38
+> requests). Consistent with the idle-based theory, now recorded as a constraint in
+> CLAUDE.md rather than just here.
 
 ---
 

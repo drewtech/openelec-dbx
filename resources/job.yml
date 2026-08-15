@@ -1,0 +1,28 @@
+resources:
+  jobs:
+    openelec_refresh:
+      name: openelec_refresh
+      # Deliberately paused on first deploy -- flip to UNPAUSED when ready to
+      # run unattended. No point spending fair-usage quota on a daily
+      # schedule while still actively iterating on the pipeline.
+      trigger:
+        pause_status: PAUSED
+        periodic:
+          interval: 1
+          unit: DAYS
+      tasks:
+        - task_key: fetch_api_incremental
+          notebook_task:
+            notebook_path: ../ingestion/fetch_api.py
+          environment_key: default_env
+        - task_key: refresh_pipeline
+          depends_on:
+            - task_key: fetch_api_incremental
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.openelec.id}
+      environments:
+        - environment_key: default_env
+          spec:
+            client: "4"
+            dependencies:
+              - requests
