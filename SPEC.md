@@ -11,7 +11,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 |---|---|---|
 | 0 — Foundation | ✅ Done | Bundle deployed, catalog/schemas/volume created, egress test complete — see finding below. |
 | 1 — Bronze | ✅ Done | 1a (bucket backfill), 1b (API incremental), and bronze tables all done and verified. |
-| 2 — Silver | ⬜ Not started | |
+| 2 — Silver | ✅ Done | `dim_unit`, `generation_daily_by_fueltech`, `facility_generation` all built and verified. |
 | 3 — Gold | ⬜ Not started | |
 | 4 — Orchestration | ⬜ Not started | |
 | 5 — Dashboard | ⬜ Deferred | Build in UI first, `bundle generate` after |
@@ -278,43 +278,63 @@ needed.
 parses and matches the source API/bucket shape.
 
 > **Note:** a later update on this pipeline sat in `CREATED` for ~7 minutes before
-> progressing — genuine serverless cold-start (compute had spun down after ~25 min idle
-> since the prior run), not a stuck/failed update. `databricks pipelines get-update`
-> reported the coarse state; `databricks pipelines get` (top-level, `latest_updates[]`)
-> and `list-pipeline-events` showed the same delay more legibly. If a bundle-run poll
-> looks stuck, check events before assuming failure — matches the skill's own guidance
-> that serverless `INITIALIZING` cold starts are normal and shouldn't be killed.
+> progressing — genuine serverless cold-start, not a stuck/failed update (more data
+> points and the fuller picture in Phase 2's notes below). If a bundle-run poll looks
+> stuck, check `list-pipeline-events` before assuming failure.
 
 ---
 
-## Phase 2 — Silver
+## Phase 2 — Silver — ✅ done
 
-- [ ] `utils/fueltech.py` — fueltech → group / renewable-flag mapping. This exists only
-      in the docs, never in either API, so it is hardcoded: `coal_black|coal_brown →
-      coal`; `gas_ccgt|gas_ocgt|gas_recip|gas_steam|gas_wcmg → gas`; `solar_*` → solar;
-      `wind|wind_offshore` → wind; `bioenergy_*` → bioenergy; plus `hydro`,
-      `distillate`, and battery charge/discharge separately. `nuclear`, `imports`,
-      `exports`, `interconnector` and the aggregator techs have no group — leave null
-      rather than inventing one.
-- [ ] `utils/schemas.py` — explicit `StructType` for each source. Both are versioned
-      payloads that will drift; keeping schemas in one importable module beats
-      scattering `from_json` literals across transformations.
-- [ ] `silver.py` — `dim_unit` (materialized view from the bucket facilities blob, grain
-      `unit_code`, carries fueltech/group/renewable flag, capacity, emissions factor,
-      dispatch type, lat/lng).
-- [ ] `silver.py` — `generation_daily_by_fueltech` (materialized view from bucket stats;
-      positional value array → `posexplode` for timestamps; grain `nem_date ×
-      network_region × fueltech_id × metric`; no join needed).
-- [ ] `silver.py` — `facility_generation` (streaming table from API bronze, long format;
-      explode metric → unit → `[ts, value]` pairs; derive `nem_time` from UTC points,
-      not the naive envelope fields; dedupe re-fetches via `create_auto_cdc_flow` keyed
-      on `(unit_code, interval_ts_utc, metric)`, sequenced by `fetched_at`).
-- [ ] Expectations: `expect_or_drop` on null keys; warn-only `expect` on `value >= 0`
-      for power/energy (negative is legitimate for load/battery-charging units).
+- [x] `utils/fueltech.py` — fueltech → group / renewable-flag mapping, hardcoded (only
+      exists in docs, never an API). Exposes `Column`-expression builders (`create_map`
+      lookup), not a UDF. **Bug caught and fixed:** `pumps` was missing from the map on
+      first pass despite the original Phase 0 research explicitly listing it as its own
+      group — first pipeline run showed it landing in the "no group" bucket alongside
+      `battery` (which correctly has no group). Fixed and reverified.
+- [x] `utils/schemas.py` — explicit `StructType` per source, confirmed against **real
+      landed bronze data**, not just research assumptions (see shapes below).
+- [x] `silver.py` — `dim_unit`: materialized view from the bucket facilities blob, grain
+      `unit_code`. **Filtered to `network_id = 'NEM'`** — the bucket registry covers NEM
+      *and* WEM (114 WEM units found on first run), project scope is NEM only.
+      `@dp.expect_or_drop` on null `unit_code`. 917 units, 16 fueltechs represented.
+- [x] `silver.py` — `generation_daily_by_fueltech`: materialized view from bucket stats;
+      `posexplode` the positional value array, `date_add(history_start, pos)` for the
+      calendar date (interval is always `1d` for this source — no offset/timezone math
+      needed, unlike the API path). `@dp.expect_or_drop` on null key columns correctly
+      filtered out 178,336 rows that were never fueltech data at all — the bucket's daily
+      files bundle `temperature_min/max/mean` and network-level `demand`/`market_value`
+      series alongside fueltech generation in the same response. 1,047,701 rows, spanning
+      1998-12-31 → 2026-08-14.
+- [x] `silver.py` — `facility_generation`: streaming table from API bronze, CDC-deduped.
+      Pre-processing lives in a `@dp.temporary_view()` (not a private streaming table —
+      `create_auto_cdc_flow`'s `source` must be a table/view name, and the skill guidance
+      is explicit that a temp view is the documented pre-processing pattern, not a
+      materialized intermediate). `keys=["unit_code","interval_ts_utc","metric"]`,
+      `sequence_by="ingested_at"` (bronze's file-modification-time column — a fine proxy
+      for fetch time, no separate "fetched_at" field needed), `stored_as_scd_type=1`.
+      `expect_all_or_drop` on null keys, warn-only `expect_all` on `value >= 0`.
+      5,649,344 rows, 615 units, spanning trailing ~370 days as designed.
+- [x] **Timestamp parsing simpler than research assumed:** live API timestamps carry
+      explicit offsets (`"2026-08-08T17:50:00+10:00"`), not the `Z`-suffix UTC the
+      research fixture showed. A plain `.cast("timestamp")` on the string parses the
+      offset correctly — no `AT TIME ZONE 'Etc/GMT-10'` manual conversion needed.
 
-**Verify:** `dim_unit` count ≈ NEM unit count, no null `fueltech_id` on operating units;
-`generation_daily_by_fueltech` spans 1999→now with no date gaps; zero duplicate
-`(unit_code, interval_ts_utc, metric)` in the fact; nulls survived rather than becoming zeros.
+**Verify:** ✅ all three tables built, verified via row counts + spot-checks above.
+Negative `value` count in `facility_generation` (262,984) is expected — legitimate for
+load/battery-charging units per the warn-only expectation design, not investigated
+further at that grain.
+
+> **Observed: serverless pipeline cold-start varies with compute idle time, not fixed.**
+> Three consecutive updates: ~7 min (after ~25 min idle), ~10 min (after ~1 min idle —
+> so idle time alone doesn't fully explain it either), then 25s and 25s (immediately
+> back-to-back, compute still warm). Real work once compute is ready is consistently
+> fast (seconds). `databricks pipelines get-update` reports a coarse/stale-looking state;
+> `databricks pipelines get` (`latest_updates[]`) and `list-pipeline-events` show what's
+> actually happening. Don't assume a long `CREATED`/`WAITING_FOR_RESOURCES` wait means
+> stuck — check events. Not yet clear whether this is materially worse than paid tiers or
+> just more variable; worth more data points before writing it into CLAUDE.md as a firm
+> constraint.
 
 ---
 
