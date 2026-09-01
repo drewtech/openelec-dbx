@@ -1,0 +1,710 @@
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {
+        "id": "10000000000000000000000000000001",
+        "question": [
+          "Which wind farms in South Australia had the highest capacity factor last month?"
+        ]
+      },
+      {
+        "id": "10000000000000000000000000000002",
+        "question": [
+          "What was the renewable share by region last year?"
+        ]
+      },
+      {
+        "id": "10000000000000000000000000000003",
+        "question": [
+          "How has coal generation in Victoria changed since 2000?"
+        ]
+      },
+      {
+        "id": "10000000000000000000000000000004",
+        "question": [
+          "Which facilities generated the most energy in the last 30 days?"
+        ]
+      },
+      {
+        "id": "10000000000000000000000000000005",
+        "question": [
+          "What is the emissions intensity trend by region?"
+        ]
+      },
+      {
+        "id": "10000000000000000000000000000006",
+        "question": [
+          "Show me the generation mix for New South Wales"
+        ]
+      }
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {
+        "identifier": "openelec.gold.dim_facility",
+        "column_configs": [
+          {
+            "column_name": "network_region",
+            "synonyms": [
+              "New South Wales",
+              "NSW",
+              "Queensland",
+              "QLD",
+              "South Australia",
+              "SA",
+              "Tasmania",
+              "TAS",
+              "Victoria",
+              "VIC"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "openelec.gold.emissions_intensity_daily",
+        "column_configs": [
+          {
+            "column_name": "network_region",
+            "synonyms": [
+              "New South Wales",
+              "NSW",
+              "Queensland",
+              "QLD",
+              "South Australia",
+              "SA",
+              "Tasmania",
+              "TAS",
+              "Victoria",
+              "VIC"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "openelec.gold.facility_capacity_factor",
+        "column_configs": [
+          {
+            "column_name": "network_region",
+            "synonyms": [
+              "New South Wales",
+              "NSW",
+              "Queensland",
+              "QLD",
+              "South Australia",
+              "SA",
+              "Tasmania",
+              "TAS",
+              "Victoria",
+              "VIC"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "openelec.gold.facility_daily",
+        "column_configs": [
+          {
+            "column_name": "network_region",
+            "synonyms": [
+              "New South Wales",
+              "NSW",
+              "Queensland",
+              "QLD",
+              "South Australia",
+              "SA",
+              "Tasmania",
+              "TAS",
+              "Victoria",
+              "VIC"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "openelec.gold.generation_mix_daily",
+        "column_configs": [
+          {
+            "column_name": "network_region",
+            "synonyms": [
+              "New South Wales",
+              "NSW",
+              "Queensland",
+              "QLD",
+              "South Australia",
+              "SA",
+              "Tasmania",
+              "TAS",
+              "Victoria",
+              "VIC"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "openelec.gold.renewable_share_daily",
+        "column_configs": [
+          {
+            "column_name": "network_region",
+            "synonyms": [
+              "New South Wales",
+              "NSW",
+              "Queensland",
+              "QLD",
+              "South Australia",
+              "SA",
+              "Tasmania",
+              "TAS",
+              "Victoria",
+              "VIC"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "instructions": {
+    "example_question_sqls": [
+      {
+        "id": "20000000000000000000000000000001",
+        "question": [
+          "Which wind farms in South Australia had the highest capacity factor last month?"
+        ],
+        "sql": [
+          "SELECT f.facility_code, f.facility_name, AVG(c.capacity_factor) AS avg_capacity_factor\n",
+          "FROM openelec.gold.facility_capacity_factor c\n",
+          "JOIN openelec.gold.dim_facility f ON f.facility_code = c.facility_code\n",
+          "WHERE f.primary_fueltech_group = 'wind'\n",
+          "  AND c.network_region = 'SA1'\n",
+          "  AND c.nem_date >= date_sub(current_date(), 30)\n",
+          "  AND c.capacity_factor IS NOT NULL\n",
+          "GROUP BY f.facility_code, f.facility_name\n",
+          "ORDER BY avg_capacity_factor DESC, f.facility_code ASC;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000002",
+        "question": [
+          "How has coal generation in Victoria changed since 2000?",
+          "What is the long-run trend in coal generation for VIC1?"
+        ],
+        "sql": [
+          "SELECT YEAR(nem_date) AS yr, SUM(generated_mwh) AS coal_mwh\n",
+          "FROM openelec.gold.generation_mix_daily\n",
+          "WHERE network_region = 'VIC1' AND fueltech_group = 'coal'\n",
+          "GROUP BY YEAR(nem_date)\n",
+          "ORDER BY yr ASC;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000003",
+        "question": [
+          "Compare renewable share across all NEM regions last year."
+        ],
+        "sql": [
+          "SELECT network_region, AVG(renewable_share) AS avg_renewable_share\n",
+          "FROM openelec.gold.renewable_share_daily\n",
+          "WHERE YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+          "GROUP BY network_region\n",
+          "ORDER BY avg_renewable_share DESC;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000004",
+        "question": [
+          "Which solar facilities have the best capacity factor?"
+        ],
+        "sql": [
+          "SELECT f.facility_code, f.facility_name, f.network_region, AVG(c.capacity_factor) AS avg_capacity_factor\n",
+          "FROM openelec.gold.facility_capacity_factor c\n",
+          "JOIN openelec.gold.dim_facility f ON f.facility_code = c.facility_code\n",
+          "WHERE f.primary_fueltech_group = 'solar' AND c.capacity_factor IS NOT NULL\n",
+          "GROUP BY f.facility_code, f.facility_name, f.network_region\n",
+          "ORDER BY avg_capacity_factor DESC\n",
+          "LIMIT 10;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000005",
+        "question": [
+          "What was the renewable share in South Australia over the period the facility data covers?"
+        ],
+        "sql": [
+          "-- facility_capacity_factor / facility_daily only cover a trailing ~370-day window,\n",
+          "-- while renewable_share_daily has deep history back to 1998-12-31 -- scope the\n",
+          "-- comparison to the shorter window explicitly rather than defaulting to full history.\n",
+          "WITH window AS (\n",
+          "  SELECT MIN(nem_date) AS start_date, MAX(nem_date) AS end_date\n",
+          "  FROM openelec.gold.facility_daily\n",
+          ")\n",
+          "SELECT AVG(r.renewable_share) AS avg_renewable_share\n",
+          "FROM openelec.gold.renewable_share_daily r, window w\n",
+          "WHERE r.network_region = 'SA1' AND r.nem_date BETWEEN w.start_date AND w.end_date;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000006",
+        "question": [
+          "What fueltechs does this facility have?",
+          "What is the primary technology at Eraring?"
+        ],
+        "sql": [
+          "SELECT facility_code, facility_name, primary_fueltech_group, fueltech_groups, unit_count\n",
+          "FROM openelec.gold.dim_facility\n",
+          "WHERE facility_name = 'Eraring';"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000007",
+        "question": [
+          "What was total generation by fueltech in New South Wales last year?"
+        ],
+        "sql": [
+          "-- network_region stores codes like NSW1, not full names -- \"New South Wales\" means NSW1.\n",
+          "SELECT fueltech_group, SUM(generated_mwh) AS total_mwh\n",
+          "FROM openelec.gold.generation_mix_daily\n",
+          "WHERE network_region = 'NSW1' AND YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+          "GROUP BY fueltech_group\n",
+          "ORDER BY total_mwh DESC;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000008",
+        "question": [
+          "What is the emissions intensity trend for Queensland over the last 5 years?"
+        ],
+        "sql": [
+          "SELECT YEAR(nem_date) AS yr, AVG(emissions_intensity_tco2e_per_mwh) AS avg_intensity\n",
+          "FROM openelec.gold.emissions_intensity_daily\n",
+          "WHERE network_region = 'QLD1' AND nem_date >= date_sub(current_date(), 1825)\n",
+          "GROUP BY YEAR(nem_date)\n",
+          "ORDER BY yr ASC;"
+        ]
+      },
+      {
+        "id": "20000000000000000000000000000009",
+        "question": [
+          "How much market value did facilities in Victoria generate in the last 30 days?"
+        ],
+        "sql": [
+          "-- market_value_aud is revenue (AUD), not a price -- there is no price or demand\n",
+          "-- data available to this agent.\n",
+          "SELECT SUM(market_value_aud) AS total_market_value_aud\n",
+          "FROM openelec.gold.facility_daily\n",
+          "WHERE network_region = 'VIC1' AND nem_date >= date_sub(current_date(), 30);"
+        ]
+      },
+      {
+        "id": "2000000000000000000000000000000a",
+        "question": [
+          "Were there any negative generation values recently, and is that a data error?"
+        ],
+        "sql": [
+          "-- Negative energy_mwh is legitimate -- battery charging and net load, not an error.\n",
+          "SELECT facility_code, facility_name, nem_date, energy_mwh\n",
+          "FROM openelec.gold.facility_daily\n",
+          "WHERE energy_mwh < 0 AND nem_date >= date_sub(current_date(), 30)\n",
+          "ORDER BY nem_date DESC, facility_code ASC\n",
+          "LIMIT 20;"
+        ]
+      }
+    ],
+    "text_instructions": [
+      {
+        "id": "30000000000000000000000000000001",
+        "content": [
+          "Coverage windows differ by mart family -- check before comparing across marts. generation_mix_daily, renewable_share_daily, and emissions_intensity_daily have deep history back to 1998-12-31. facility_daily and facility_capacity_factor only cover a trailing ~370 days (the API window). A question spanning both families (e.g. \"compare renewable share and facility capacity factor over the same period\") must scope the deep-history mart to the facility marts actual date range, not default to full history -- see the coverage-window example SQL.\n",
+          "Region codes are NSW1, QLD1, SA1, TAS1, VIC1 in every mart -- there is no ACT (folded into NSW1) and no WA (this project is NEM only). Users say \"New South Wales\" or \"SA\" -- map these to the corresponding *1 code via the column value synonyms, do not guess or invent a code.\n",
+          "Renewable means solar, wind, hydro, and bioenergy only. Pumps and battery (battery_charging, battery_discharging) are excluded from renewable_share and from dim_facility.is_renewable. Interconnector, import, export, and other unclassified fueltechs have a NULL fueltech_group and NULL is_renewable -- never assume they are renewable or non-renewable.\n",
+          "Energy is in MWh throughout (already converted from source GWh where relevant). Capacity is in MW. Emissions are emissions_tco2e (tonnes CO2-equivalent) -- always this spelling, never emissions_tco2. market_value_aud is revenue in AUD, not a price -- this agent has no price or demand data.\n",
+          "nem_date is NEM local calendar time, fixed UTC+10, no daylight saving, in every mart. The facility marts already filter to interval = 1d internally -- never mention or re-apply an interval filter.\n",
+          "NULL means no data was reported, never a measured zero -- do not coalesce a generation, emissions, or market-value figure to 0. The one deliberate exception is renewable_share_daily.renewable_mwh, which is coalesced to 0 only when the region-day has other generation rows but none are renewable (a real zero, not missing data); renewable_share itself stays NULL only when total_mwh is NULL or 0.\n",
+          "Negative energy_mwh values are legitimate in the facility-grain marts -- battery charging and net load, not a data error.\n",
+          "facility_capacity_factor.capacity_factor divides by operating-status capacity only and is the recommended measure. capacity_factor_all_units divides by all-status capacity (including committed and retired units) and understates utilisation -- only use it if the user explicitly asks to include non-operating capacity.\n",
+          "dim_facility is a current registry snapshot, not a time series -- it has no nem_date. Join it to facility_daily or facility_capacity_factor on facility_code to get fueltech, region, and capacity context. primary_fueltech_group is the group holding the most registered capacity at that facility; a facility can have secondary technologies too, listed in fueltech_groups (e.g. a solar-plus-battery facility)."
+        ]
+      }
+    ]
+  },
+  "benchmarks": {
+    "questions": [
+      {
+        "id": "40000000000000000000000000000001",
+        "question": [
+          "What was the total generation by fueltech group in NSW1 for the last full calendar year?",
+          "Which fuel technologies generated the most electricity in New South Wales last year?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT fueltech_group, SUM(generated_mwh) AS total_mwh\n",
+              "FROM openelec.gold.generation_mix_daily\n",
+              "WHERE network_region = 'NSW1' AND YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+              "GROUP BY fueltech_group\n",
+              "ORDER BY total_mwh DESC, fueltech_group ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000002",
+        "question": [
+          "Which NEM region generated the most electricity from wind in the last full calendar year?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT network_region, SUM(generated_mwh) AS wind_mwh\n",
+              "FROM openelec.gold.generation_mix_daily\n",
+              "WHERE fueltech_group = 'wind' AND YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+              "GROUP BY network_region\n",
+              "ORDER BY wind_mwh DESC, network_region ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000003",
+        "question": [
+          "How has coal's share of generation in Victoria changed between 2000 and 2024?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "WITH yearly AS (\n",
+              "  SELECT YEAR(nem_date) AS yr,\n",
+              "         SUM(CASE WHEN fueltech_group = 'coal' THEN generated_mwh ELSE 0 END) AS coal_mwh,\n",
+              "         SUM(generated_mwh) AS total_mwh\n",
+              "  FROM openelec.gold.generation_mix_daily\n",
+              "  WHERE network_region = 'VIC1' AND YEAR(nem_date) IN (2000, 2024)\n",
+              "  GROUP BY YEAR(nem_date)\n",
+              ")\n",
+              "SELECT yr, coal_mwh, total_mwh, coal_mwh / total_mwh AS coal_share\n",
+              "FROM yearly\n",
+              "ORDER BY yr ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000004",
+        "question": [
+          "Total generation in South Australia for the last full calendar year, by fueltech group.",
+          "What did SA1 generate by fuel type last year?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT fueltech_group, SUM(generated_mwh) AS total_mwh\n",
+              "FROM openelec.gold.generation_mix_daily\n",
+              "WHERE network_region = 'SA1' AND YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+              "GROUP BY fueltech_group\n",
+              "ORDER BY total_mwh DESC, fueltech_group ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000005",
+        "question": [
+          "What was the average renewable share by region for the last full calendar year?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT network_region, AVG(renewable_share) AS avg_renewable_share\n",
+              "FROM openelec.gold.renewable_share_daily\n",
+              "WHERE YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+              "GROUP BY network_region\n",
+              "ORDER BY avg_renewable_share DESC, network_region ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000006",
+        "question": [
+          "Which day had the highest renewable share in Tasmania in the last 5 years?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT nem_date, renewable_share\n",
+              "FROM openelec.gold.renewable_share_daily\n",
+              "WHERE network_region = 'TAS1'\n",
+              "  AND nem_date >= date_sub(current_date(), 1825)\n",
+              "  AND renewable_share IS NOT NULL\n",
+              "ORDER BY renewable_share DESC, nem_date ASC\n",
+              "LIMIT 1;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000007",
+        "question": [
+          "What's the renewable share trend in South Australia, by year, 2015 through 2024?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT YEAR(nem_date) AS yr, AVG(renewable_share) AS avg_renewable_share\n",
+              "FROM openelec.gold.renewable_share_daily\n",
+              "WHERE network_region = 'SA1' AND YEAR(nem_date) BETWEEN 2015 AND 2024\n",
+              "GROUP BY YEAR(nem_date)\n",
+              "ORDER BY yr ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000008",
+        "question": [
+          "Which NEM region has the lowest average emissions intensity over the last full calendar year?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT network_region, AVG(emissions_intensity_tco2e_per_mwh) AS avg_intensity\n",
+              "FROM openelec.gold.emissions_intensity_daily\n",
+              "WHERE YEAR(nem_date) = YEAR(CURRENT_DATE()) - 1\n",
+              "GROUP BY network_region\n",
+              "ORDER BY avg_intensity ASC, network_region ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000009",
+        "question": [
+          "What was the average grid emissions intensity in Queensland by calendar year, 2019 to 2024?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT YEAR(nem_date) AS yr, AVG(emissions_intensity_tco2e_per_mwh) AS avg_intensity\n",
+              "FROM openelec.gold.emissions_intensity_daily\n",
+              "WHERE network_region = 'QLD1' AND YEAR(nem_date) BETWEEN 2019 AND 2024\n",
+              "GROUP BY YEAR(nem_date)\n",
+              "ORDER BY yr ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4000000000000000000000000000000a",
+        "question": [
+          "Which facility generated the most energy in the last 30 days?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT facility_code, facility_name, network_region, SUM(energy_mwh) AS total_mwh\n",
+              "FROM openelec.gold.facility_daily\n",
+              "WHERE nem_date >= date_sub(current_date(), 30)\n",
+              "GROUP BY facility_code, facility_name, network_region\n",
+              "ORDER BY total_mwh DESC, facility_code ASC\n",
+              "LIMIT 10;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4000000000000000000000000000000b",
+        "question": [
+          "Top 10 facilities by market value over the last 90 days."
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT facility_code, facility_name, network_region, SUM(market_value_aud) AS total_market_value_aud\n",
+              "FROM openelec.gold.facility_daily\n",
+              "WHERE nem_date >= date_sub(current_date(), 90)\n",
+              "GROUP BY facility_code, facility_name, network_region\n",
+              "ORDER BY total_market_value_aud DESC, facility_code ASC\n",
+              "LIMIT 10;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4000000000000000000000000000000c",
+        "question": [
+          "Total energy generated by facility in NSW1 over the last 30 days, ranked highest to lowest."
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT facility_code, facility_name, SUM(energy_mwh) AS total_mwh\n",
+              "FROM openelec.gold.facility_daily\n",
+              "WHERE network_region = 'NSW1' AND nem_date >= date_sub(current_date(), 30)\n",
+              "GROUP BY facility_code, facility_name\n",
+              "ORDER BY total_mwh DESC, facility_code ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4000000000000000000000000000000d",
+        "question": [
+          "Which facilities had the highest capacity factor over the last 30 days?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT facility_code, facility_name, network_region, AVG(capacity_factor) AS avg_capacity_factor\n",
+              "FROM openelec.gold.facility_capacity_factor\n",
+              "WHERE nem_date >= date_sub(current_date(), 30) AND capacity_factor IS NOT NULL\n",
+              "GROUP BY facility_code, facility_name, network_region\n",
+              "ORDER BY avg_capacity_factor DESC, facility_code ASC\n",
+              "LIMIT 10;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4000000000000000000000000000000e",
+        "question": [
+          "What was the average capacity factor by region over the last 90 days?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT network_region, AVG(capacity_factor) AS avg_capacity_factor\n",
+              "FROM openelec.gold.facility_capacity_factor\n",
+              "WHERE nem_date >= date_sub(current_date(), 90) AND capacity_factor IS NOT NULL\n",
+              "GROUP BY network_region\n",
+              "ORDER BY avg_capacity_factor DESC, network_region ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "4000000000000000000000000000000f",
+        "question": [
+          "Which 5 facilities had the lowest capacity factor over the last 30 days, among those with at least 10 days of data?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT facility_code, facility_name, network_region, AVG(capacity_factor) AS avg_capacity_factor, COUNT(*) AS days\n",
+              "FROM openelec.gold.facility_capacity_factor\n",
+              "WHERE nem_date >= date_sub(current_date(), 30) AND capacity_factor IS NOT NULL\n",
+              "GROUP BY facility_code, facility_name, network_region\n",
+              "HAVING COUNT(*) >= 10\n",
+              "ORDER BY avg_capacity_factor ASC, facility_code ASC\n",
+              "LIMIT 5;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000010",
+        "question": [
+          "What was the average renewable share in South Australia over the same period the facility-level data covers?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "WITH window AS (\n",
+              "  SELECT MIN(nem_date) AS start_date, MAX(nem_date) AS end_date\n",
+              "  FROM openelec.gold.facility_daily\n",
+              ")\n",
+              "SELECT AVG(r.renewable_share) AS avg_renewable_share\n",
+              "FROM openelec.gold.renewable_share_daily r, window w\n",
+              "WHERE r.network_region = 'SA1'\n",
+              "  AND r.nem_date BETWEEN w.start_date AND w.end_date;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000011",
+        "question": [
+          "What was the total market value generated by SA1 facilities in the last 30 days?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT SUM(market_value_aud) AS total_market_value_aud\n",
+              "FROM openelec.gold.facility_daily\n",
+              "WHERE network_region = 'SA1' AND nem_date >= date_sub(current_date(), 30);"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000012",
+        "question": [
+          "How many distinct NEM regions are in the generation data, and what are they?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT DISTINCT network_region\n",
+              "FROM openelec.gold.generation_mix_daily\n",
+              "ORDER BY network_region ASC;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000013",
+        "question": [
+          "What was the highest single-day total generation recorded in Queensland since 1999?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT nem_date, SUM(generated_mwh) AS total_mwh\n",
+              "FROM openelec.gold.generation_mix_daily\n",
+              "WHERE network_region = 'QLD1'\n",
+              "GROUP BY nem_date\n",
+              "ORDER BY total_mwh DESC, nem_date ASC\n",
+              "LIMIT 1;"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "40000000000000000000000000000014",
+        "question": [
+          "Were there any days with negative total generation for a fueltech group in NSW1 over the last 90 days, and which groups and dates?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT nem_date, fueltech_group, generated_mwh\n",
+              "FROM openelec.gold.generation_mix_daily\n",
+              "WHERE network_region = 'NSW1'\n",
+              "  AND nem_date >= date_sub(current_date(), 90)\n",
+              "  AND generated_mwh < 0\n",
+              "ORDER BY nem_date ASC, fueltech_group ASC;"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
