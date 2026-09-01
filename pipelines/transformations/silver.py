@@ -60,6 +60,11 @@ def dim_unit():
 @dp.expect_or_drop(
     "valid_key", "nem_date IS NOT NULL AND network_region IS NOT NULL AND fueltech_id IS NOT NULL"
 )
+# stats_energy_raw's `data` array also carries region-level demand (id like
+# `au.nem.<region>.demand.*`) and weather series -- neither has a fueltech, so
+# valid_key above correctly drops them (~178k rows, stable across runs).
+# Demand is captured separately in demand_daily below; weather is
+# intentionally still discarded, this table is generation-only.
 def generation_daily_by_fueltech():
     series = spark.read.table("stats_energy_raw").select(
         F.explode(F.from_json("raw_json", STATS_SCHEMA)["data"]).alias("series")
@@ -80,6 +85,38 @@ def generation_daily_by_fueltech():
         is_renewable_expr(F.col("fueltech_id")).alias("is_renewable"),
         "metric",
         "generated",  # null = no data reported; 0 = measured zero. Never coalesced.
+        "uom",
+    )
+
+
+@dp.materialized_view(
+    name="openelec.silver.demand_daily",
+    comment=(
+        "Daily NEM regional demand -- energy (GWh) and its market value (AUD), 2006-present "
+        "(shorter window than generation_daily_by_fueltech's 1999-present -- demand series "
+        "start later in the bucket). Sourced from the same stats_energy_raw files as "
+        "generation_daily_by_fueltech, split out via the `au.nem.<region>.demand.*` id "
+        "family: demand has no fueltech, so it would otherwise just be dropped by that "
+        "table's valid_key expectation."
+    ),
+)
+@dp.expect_or_drop("valid_key", "nem_date IS NOT NULL AND network_region IS NOT NULL")
+def demand_daily():
+    series = spark.read.table("stats_energy_raw").select(
+        F.explode(F.from_json("raw_json", STATS_SCHEMA)["data"]).alias("series")
+    )
+    points = series.filter(F.col("series.id").like("%.demand.%")).select(
+        F.col("series.type").alias("metric"),
+        F.col("series.region").alias("network_region"),
+        F.col("series.units").alias("uom"),
+        F.to_date(F.col("series.history.start")).alias("history_start"),
+        F.posexplode("series.history.data").alias("pos", "value"),
+    )
+    return points.select(
+        F.date_add(F.col("history_start"), F.col("pos")).alias("nem_date"),
+        "network_region",
+        "metric",
+        "value",  # null = no data reported; 0 = measured zero. Never coalesced.
         "uom",
     )
 

@@ -1,0 +1,8 @@
+resources:
+  genie_spaces:
+    openelec_genie:
+      title: OpenElectricity NEM
+      description: Natural-language Q&A over NEM generation, emissions and capacity marts.
+      warehouse_id: ${var.warehouse_id}
+      parent_path: /Workspace/Users/${workspace.current_user.userName}/genie_spaces
+      file_path: ./openelec.geniespace.json
