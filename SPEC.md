@@ -15,7 +15,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | 3 — Gold | ✅ Done | All 5 marts built and sanity-checked against known NEM reality. |
 | 4 — Orchestration | ✅ Done | Job deployed, manually tested end-to-end (fetch → pipeline refresh), left paused. |
 | 5 — Dashboard | ⬜ Deferred | Build in UI first, `bundle generate` after |
-| 6 — Genie | ⬜ Deferred | Requires direct engine (already committed) |
+| 6 — Genie | 🔄 In progress | Plan of record: `docs/genie-spec.md`. G0/G1/G3/G4 done (2026-08-30): baseline **5/20 (25%)** → curated **10/20 (50%)**, exactly doubled. G2 (metric views, optional/cuttable) skipped for now. |
 
 ## Context
 
@@ -306,6 +306,13 @@ parses and matches the source API/bucket shape.
       files bundle `temperature_min/max/mean` and network-level `demand`/`market_value`
       series alongside fueltech generation in the same response. 1,047,701 rows, spanning
       1998-12-31 → 2026-08-14.
+- [x] **`demand_daily` added 2026-08-30**, splitting out the region-level demand half of
+      that same 178,336-row drop (the other half, temperature, is still intentionally
+      discarded — out of project scope). Filters `stats_energy_raw` on the
+      `au.nem.<region>.demand.*` id family instead of relying on null `fuel_tech`.
+      `@dp.expect_or_drop` on null key columns, 0 dropped. 75,310 rows (5 regions × energy
+      + market_value × 2006-01-01 → 2026-08-14 — shorter window than the fueltech table,
+      demand series start later in the bucket).
 - [x] `silver.py` — `facility_generation`: streaming table from API bronze, CDC-deduped.
       Pre-processing lives in a `@dp.temporary_view()` (not a private streaming table —
       `create_auto_cdc_flow`'s `source` must be a table/view name, and the skill guidance
@@ -370,6 +377,32 @@ the same explode/pivot logic three times.
 Grain and naming: `generated_mwh`/`energy_mwh` not `value`, `nem_date` not `d`, a comment
 on every table (column-level comments deferred — would need explicit `schema=` strings
 per table; naming + table comments already carry most of the Genie-readability value).
+
+- [x] **G1 (Phase 6 prerequisite) landed 2026-08-30** — see `docs/genie-spec.md`:
+      new `dim_facility` mart (facility-grain rollup of `dim_unit`; 545 facilities, 917
+      units, `primary_fueltech_group` by largest registered capacity, `fueltech_groups`
+      array); `facility_capacity_factor` now exposes both `capacity_factor` (operating
+      capacity only, the new default) and `capacity_factor_all_units` (all statuses,
+      previous behavior) — some facilities (e.g. Liddell, fully retired) correctly show
+      NULL operating-capacity-factor now instead of a diluted number; `facility_daily`'s
+      `emissions_tco2` renamed `emissions_tco2e`; `renewable_share_daily`'s
+      `renewable_mwh` now coalesces to 0 only when the region-day has other generation
+      rows (so `renewable_share` is NULL only when `total_mwh` is NULL/0, never a false
+      NULL from an all-fossil day); explicit `schema=` column comments added to all six
+      public gold marts. PK/FK constraints verified supported (`schema=` accepts them,
+      confirmed via skill reference) but **deliberately skipped** — untested constraint
+      syntax risked a wasted pipeline run for a single-user Free Edition project with a
+      6-table cap; joins carried via Genie's `example_question_sqls` instead (G3).
+      Two pipeline updates (main change + a comment-only correction after empirically
+      disproving a caveat in the pipelines skill reference — see below), both clean,
+      15/15 flows completed each time.
+- [x] **Skill reference doc claim disproven empirically:** the Lakeflow Pipelines skill's
+      `materialized-view-sql.md` states "Sum aggregates over a nullable column return 0
+      (not NULL) when only NULLs remain." Tested directly on this warehouse
+      (`SELECT SUM(CAST(NULL AS DOUBLE))`) and against real data (every fully-retired
+      facility's `capacity_registered_mw_operating`): both come back NULL, standard Spark
+      semantics, not 0. Gold-layer column comments were written to state the plain NULL
+      rule without that caveat.
 
 **Verify:** ✅ sanity SQL against known reality passed on every mart — see results above.
 No date gaps checked directly but row counts (281,830 for ~27.6 years × 5 regions × ~11
