@@ -15,6 +15,11 @@ variables:
   catalog:
     description: Unity Catalog catalog for this project
     default: openelec
+  warehouse_id:
+    description: >-
+      SQL warehouse backing the Genie space (Free Edition: one shared 2X-Small).
+      Found via `dbx warehouses list` — see docs/genie-spec.md G0.
+    default: 5e6a78f2a3683e91
 
 targets:
   dev:
