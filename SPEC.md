@@ -16,6 +16,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | 4 — Orchestration | ✅ Done | Job deployed, manually tested end-to-end (fetch → pipeline refresh), left paused. |
 | 5 — Dashboard | ⬜ Deferred | Build in UI first, `bundle generate` after |
 | 6 — Genie | 🔄 In progress | Plan of record: `docs/genie-spec.md`. G0/G1/G3/G4 done (2026-08-30): baseline **5/20 (25%)** → curated **10/20 (50%)**, exactly doubled. G2 (metric views, optional/cuttable) skipped for now. |
+| 7 — Web delivery | ✅ done | Four-way Genie UI comparison, all live against this workspace (2026-09-02): standalone site (`web/`, chat + Preview agent mode with follow-ups), a Databricks App (`app/`, AppKit `GenieChat` + a custom `useGenieChat` tab), and the official iframe embed, tied together by a Compare tab. Details: `web/README.md`. |
 
 ## Context
 
@@ -459,6 +460,92 @@ cached/no-op) at every layer. Schedule is registered but paused — unpause when
 > compute, then pipeline compute) sequentially, on top of the actual fetch work (~38
 > requests). Consistent with the idle-based theory, now recorded as a constraint in
 > CLAUDE.md rather than just here.
+
+---
+
+## Phase 7 — Web delivery — ✅ done
+
+A four-way comparison of ways to put the Phase 6 Genie space in front of a user, two hand-rolled
+("outside Databricks") and two native ("inside Databricks"), all run live against this
+workspace rather than just documented. Full detail: `web/README.md`.
+
+- [x] **A — Standalone site, chat mode** (`web/`). React + Vite client, Express proxy holding
+      the token. Conversation API: `start-conversation` → poll `messages/{id}` every 2s →
+      `query-result` per attachment. SSE re-emitted to the browser using AppKit's own event
+      names (`message_start`/`status`/`query_result`/`message_result`/`error`) so the client
+      logic would port cleanly — B proves it did.
+- [x] **A2 — Agent mode tab** (Preview). `POST /api/2.0/genie/agents/{space_id}/responses`,
+      originally reverse-engineered (no CLI subcommand shipped for it), since confirmed
+      documented: https://docs.databricks.com/aws/en/genie-agents/api. Confirmed **not**
+      admin-gated on this workspace. Reasoning → SQL → result → narrative answer over SSE.
+      Conversation continuation implemented in item E below. Remaining known gap: no
+      `type_name` on result columns (chat mode's statement API has it, agent mode's message
+      metadata doesn't).
+- [x] **B — Databricks App** (`app/`). `databricks apps init --features genie --set
+      genie.genie-space.id=<id>` (resource key `genie-space` confirmed via `dbx apps manifest`,
+      not guessed). Two tabs: stock `<GenieChat/>`, and a custom tab porting `web/`'s
+      SqlPanel/ResultTable/StatusStepper onto `useGenieChat`. `dbx apps validate` clean
+      (typecheck, ast-grep lint, build, tests); deployed via `dbx bundle deploy` (its
+      `lifecycle.started: true` starts it in the same step — no separate `apps deploy`
+      needed); confirmed `RUNNING` at
+      `https://openelec-genie-7474660275774847.aws.databricksapps.com`, redirects
+      unauthenticated requests to Databricks OIDC login as expected.
+  - Service principal granted `USE_CATALOG` on `openelec`, `USE_SCHEMA`+`SELECT` on
+    `openelec.gold`, `CAN_USE` on the shared warehouse (Genie executes as the caller, not
+    the space owner). `CAN_RUN` on the Genie space itself came for free from the bundle's
+    `genie_space` resource on every deploy — confirmed via `dbx permissions get genie`.
+  - Two real porting gaps, not assumed: AppKit's `GenieAttachmentResponse.query` type has no
+    `instruction_id`, so the App's custom tab can't show the curated-answer badge `web/` has;
+    `GenieStatementResponse` has no `total_row_count`/`truncated`, so its result table can't
+    report a true row count. Confirmed by reading the shipped `.d.ts`, not by trial and error.
+  - AppKit's `genie()` plugin has no agent-mode route — B only ports chat mode.
+- [x] **C — Official iframe embed.** Confirmed live: dashboard and Genie space embedding share
+      one admin setting (`aibi_dashboard_embedding_approved_domains`, dashboard-flavored name,
+      gates Genie too — stated explicitly in Databricks' own admin docs). Access policy was
+      already `ALLOW_APPROVED_DOMAINS`; added `localhost:5173`/`5174` via `dbx api patch
+      /api/2.0/settings/types/aibi_dash_embed_ws_apprvd_domains/names/default` with an explicit
+      `field_mask` — the CLI's generated `settings ... update` subcommand sends an **empty**
+      field mask, which the API silently no-ops. Embed tab renders the space's own room URL in
+      an `<iframe>`; the literal Share → Embed space dialog snippet wasn't captured (no browser
+      in this environment), so this is a close approximation of that markup, not a byte copy.
+- [x] **D — Compare tab.** The four-option table (where it runs, anonymous or not, identity,
+      response richness, pros/cons) made interactive as the site's default view — each row
+      links straight into that mode.
+- [x] **E — Agent-mode conversation continuation** (2026-09-02). The agent-mode API turned out
+      to be documented after all — https://docs.databricks.com/aws/en/genie-agents/api — and
+      supports follow-ups natively: an optional top-level `conversation_id` in the request body
+      ("Existing conversation to continue. Omit to start a new one."), with the response's
+      `conversation_id` sent back on the next call. Implemented mirroring what chat mode already
+      does: `web/server/src/genie.ts` `streamAgentResponse` takes an optional `conversationId`
+      and includes `conversation_id` in the POST body when set; `web/server/src/index.ts`
+      `/api/genie/agent-responses` reads `conversationId` from the request body (same shape as
+      `/api/genie/messages`) and passes it through; `web/client/src/api.ts`
+      `streamAgentResponse` takes `conversationId` like `streamMessage` does; `App.tsx` stores
+      the id from `agent_start` in agent-mode state, sends it on the next question, clears it in
+      `clearAgent`, and the footer shows it like chat mode's does. Docs updated to drop "no
+      conversation continuation" everywhere it appeared as an agent-mode con — `web/README.md`
+      (Agent mode section, Known gaps, the four-options table), `Compare.tsx` (agent row),
+      `AgentChat.tsx` (intro line), `DEMO.md` (§2 table, §3 option 2 con), and A2 above. Kept the
+      documented limits (5 requests/min per workspace, 30-minute server timeout) and noted the
+      documented `response.output_item.updated` event we still ignore — harmless, we only act on
+      `.done`.
+      **Verify:** `cd web && npm run typecheck -w server && npm run build -w client && npm run
+      lint -w client` — all clean. Live check (ask an agent question, then a follow-up that only
+      makes sense with context, confirm the second answer uses it and the footer shows the same
+      conversation id) **not run** — no Databricks credentials configured in this environment;
+      do this once `web/server/.env` is filled in.
+
+Free Edition shaped every piece: one shared 2X-Small warehouse and a 5 req/min Genie cap split
+across all four demo paths (never run them concurrently), the App's 3-app cap and 24h auto-stop
+(restart before demoing, stop after), PAT-only auth (no `apps logs`; used `apps get` + the Apps
+UI instead), and the single workspace user meaning the embed and the App can only ever
+demonstrate one identity: whoever is signed in.
+
+**Verify:** `web/` typecheck/build/lint clean for both workspaces; `app/` `dbx apps validate`
+clean end to end; deployed App confirmed `RUNNING` and redirecting to login when unauthenticated;
+`getSpaceInfo()` confirmed serving correct `embedUrl`/`appUrl` via a direct probe (both dev
+ports were held by an already-running, untouched instance of this same site, so verification
+avoided the live port rather than contend for it).
 
 ---
 

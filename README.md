@@ -27,6 +27,8 @@ spec, phase-by-phase progress checklist, and design decisions with rationale.
 
 ## Docs
 
+- [DEMO.md](DEMO.md) — 20-minute demo runbook: pipeline, Genie chat vs agent mode, the
+  four UI options with pros/cons
 - [CLAUDE.md](CLAUDE.md) — project conventions, Free Edition constraints, data source
   notes, auth/tooling setup
 - [SPEC.md](SPEC.md) — pipeline spec and progress tracker (source of truth for what's
