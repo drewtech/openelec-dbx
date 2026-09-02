@@ -10,11 +10,12 @@ generated SQL -> execute gold SQL -> compare result sets locally) was the docume
 the eval API turned out to be unavailable. It wasn't needed here — gate passed — so it isn't
 implemented. Add it as a second `--backend` if a future workspace lacks the eval API.
 
-Shells out to the `databricks` CLI directly. Run it the same way `dbx` wraps calls to
-`databricks` in this repo -- e.g.:
+Shells out to the `databricks` CLI directly, so it needs whatever auth you've already set up
+for it -- a CLI profile, or DATABRICKS_HOST/DATABRICKS_TOKEN env vars, or a wrapper around
+either (e.g. `op run --env-file=<path> -- ...`) -- run before this script, or add
+`--profile <name>` to the `databricks` calls in `dbx()` below. E.g.:
 
-    op run --env-file=/home/drew/.env.1password -- python3 tools/run_benchmark.py \\
-        <space_id> benchmarks/baseline.json
+    python3 tools/run_benchmark.py <space_id> benchmarks/baseline.json
 
 Usage: python tools/run_benchmark.py <space_id> <output_path> [--poll-interval SECONDS] [--timeout SECONDS]
 """

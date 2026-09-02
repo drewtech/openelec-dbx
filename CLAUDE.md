@@ -65,17 +65,24 @@ as edge cases:
 - `ingestion/` — API-pull scripts/notebooks (OpenElectricity → bronze).
 - `pipelines/` — Lakeflow Declarative Pipeline definitions (silver/gold).
 - `dashboards/` — AI/BI dashboard + Genie space definitions/exports.
+- `web/` — standalone React site + Node proxy exposing Genie outside the Databricks UI
+  (Conversation API chat mode + Preview agent mode). Its own bundle-free npm project.
+- `app/` — the same Genie space as a Databricks App (AppKit `genie()` + `GenieChat`), its own
+  bundle (`app/databricks.yml`), deployed separately from the root `databricks.yml`.
 - Secrets (API keys, workspace tokens) via env vars or Databricks secret scopes
   only — never committed. Add a `.env.example` alongside any script that needs one.
-- Databricks CLI auth: PAT only — OAuth login isn't supported on Free Edition.
-  Token lives in 1Password (vault `Dev`, item `Databricks Pipeline Deploy`).
-  Use `dbx` (shell alias for `databricks` with the 1Password env-file lookup
-  already wired in — set up outside this repo, at a generic location shared
-  across projects) instead of calling `databricks` directly; no per-command
-  `op run` prefix needed here.
-  If `dbx` fails to resolve the token (locked 1Password session), run any `op`
-  command first (e.g. `op vault list`) to trigger the Windows Hello unlock
-  challenge via the desktop app integration, then retry.
+- Databricks CLI auth: this repo has no dependency on any one method — a CLI profile
+  (`databricks auth login` for OAuth where supported, `databricks configure` for a PAT),
+  or plain `DATABRICKS_HOST`/`DATABRICKS_TOKEN` env vars, or a secrets-manager wrapper
+  around either, all work identically. `dbx <cmd>` anywhere in this repo's docs is
+  shorthand for "the `databricks` CLI, with your auth already applied" — read it as
+  `databricks <cmd>` plus whatever `--profile` or env vars your setup needs.
+  Free Edition specifically only supports PAT (no OAuth login); other workspace tiers
+  may support either.
+  For `web/` and `app/`, local dev needs no CLI or secrets manager at all: copy the
+  relevant `.env.example` to `.env` and fill in real values — both are wired to load
+  it automatically (Node's `--env-file-if-exists`). The CLI is only needed for
+  deploy/manage commands (`bundle deploy`, `apps validate`, etc.).
 
 ## Status
 

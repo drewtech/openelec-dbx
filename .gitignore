@@ -9,5 +9,11 @@ __pycache__/
 *.pyc
 .venv/
 
-# Secrets (should never exist here — env vars / 1Password only — but belt and braces)
+# Secrets (should never exist here — env vars or a secrets manager only — but belt and braces)
 .env
+
+# Web demo (web/) — Node
+node_modules/
+web/**/dist/
+web/server/.env
+web/server/.env.1password
