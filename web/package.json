@@ -1,0 +1,15 @@
+{
+  "name": "openelec-genie-web",
+  "private": true,
+  "description": "Demo React site that delivers the OpenElectricity Genie space outside the Databricks UI via the Genie Conversation API.",
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client && npm run typecheck -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "prune": "npm run prune -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

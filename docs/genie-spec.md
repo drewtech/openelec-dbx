@@ -94,6 +94,13 @@ called) carries the pass/fail detail. `genie-create-eval-run --json '{}'` with a
 ran *all* the space's existing benchmarks — that's the invocation shape for "run everything,"
 useful for `tools/run_benchmark.py`.
 
+**Update 2026-09-02:** confirmed live and NOT gated on this workspace — see `web/README.md`
+Phase 7. Called `POST /api/2.0/genie/agents/{space_id}/responses` directly (no CLI subcommand
+exists); took 3 iterations to find the working request shape, which mirrors the OpenAI
+Responses API (`input: [{type:"message", role:"user", content:[{type:"input_text", text}]}]`).
+Returns a full reasoning → SQL → result → written-answer trace over SSE. Below reflects the
+state as originally written, before that test.
+
 **Assume chat-mode scoring.** Agent mode is Beta and has been admin-gated/silently downgraded;
 Free Edition is the least likely place to have it. Chat mode compares *result sets* against gold
 SQL and caps at 5,000 rows — a correct answer whose rows exceed that cap in a different order
