@@ -1,0 +1,42 @@
+bundle:
+  name: openelec-genie
+
+variables:
+  genie_space_id:
+    description: Default Genie Space ID
+  genie_space_name:
+    description: Genie Space display name
+
+resources:
+  apps:
+    app:
+      name: "openelec-genie"
+      description: "OpenElectricity NEM Genie as a Databricks App"
+      source_code_path: ./
+
+      # Start the app automatically on deploy.
+      lifecycle:
+        started: true
+      user_api_scopes:
+        - dashboards.genie
+
+      # The resources which this app has access to.
+      resources:
+        - name: genie-space
+          genie_space:
+            name: ${var.genie_space_name}
+            space_id: ${var.genie_space_id}
+            permission: CAN_RUN
+
+targets:
+  default:
+    default: true
+    # No workspace.host here on purpose — it's derived from whatever CLI profile or
+    # DATABRICKS_HOST env var you deploy with, so this bundle isn't pinned to one workspace.
+
+    variables:
+      # This project's own deployed values — replace for a different workspace, or override
+      # per-deploy without editing this file: BUNDLE_VAR_genie_space_id=<id>
+      # BUNDLE_VAR_genie_space_name=<name> databricks bundle deploy
+      genie_space_id: 01f1a447d35d13368b23dcbce2f4ed0a
+      genie_space_name: OpenElectricity NEM
