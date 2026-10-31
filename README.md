@@ -44,3 +44,5 @@ spec, phase-by-phase progress checklist, and design decisions with rationale.
   bulk source)
 - Databricks CLI ≥ 1.23.0, authenticated via a Personal Access Token (OAuth isn't
   supported on Free Edition)
+- Workspace IDs in a gitignored `.env`: `cp .env.example .env`, fill in the warehouse and
+  Genie space IDs, then load it before bundle commands (`set -a; . ./.env; set +a`)

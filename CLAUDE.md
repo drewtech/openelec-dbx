@@ -88,6 +88,8 @@ as edge cases:
   relevant `.env.example` to `.env` and fill in real values — both are wired to load
   it automatically (Node's `--env-file-if-exists`). The CLI is only needed for
   deploy/manage commands (`bundle deploy`, `apps validate`, etc.).
+  Workspace-specific IDs (warehouse ID, Genie space ID) are never committed. They come from
+  `BUNDLE_VAR_*` in a gitignored root `.env` (copy `.env.example`).
 
 ## Status
 

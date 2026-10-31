@@ -27,11 +27,11 @@ For local dev, `npm run dev` auto-loads `server/.env` if present (`cp .env.examp
 fill in `DATABRICKS_HOST`/`DATABRICKS_GENIE_SPACE_ID`) — no CLI or secrets manager required for
 that part; the CLI is only needed for `apps validate`/`bundle deploy`/`apps get` etc.
 
-**Before deploying to a different workspace:** `databricks.yml`'s `targets.default.variables`
-has this workspace's Genie space id and name hardcoded as defaults — replace them (or override
-per-deploy with `BUNDLE_VAR_genie_space_id=<id> BUNDLE_VAR_genie_space_name=<name> databricks
-bundle deploy`). There's no `workspace.host` in the bundle — it's derived from whatever profile
-or env vars you deploy with.
+**Before deploying:** `databricks.yml`'s `targets.default.variables`
+sets only the Genie space display name. The space id has no default: set
+`BUNDLE_VAR_genie_space_id` (see the root `.env.example`; `set -a; . ../.env; set +a`
+loads it). Override the name with `BUNDLE_VAR_genie_space_name`. There's no `workspace.host` in the
+bundle — it's derived from whatever profile or env vars you deploy with.
 
 ## Run it locally
 
