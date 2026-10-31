@@ -29,6 +29,8 @@ spec, phase-by-phase progress checklist, and design decisions with rationale.
 
 - [DEMO.md](DEMO.md) — 20-minute demo runbook: pipeline, Genie chat vs agent mode, the
   four UI options with pros/cons
+- [lakebase/README.md](lakebase/README.md) — Lakebase demo: two gold marts synced into managed
+  Postgres, runbook and demo script
 - [CLAUDE.md](CLAUDE.md) — project conventions, Free Edition constraints, data source
   notes, auth/tooling setup
 - [SPEC.md](SPEC.md) — pipeline spec and progress tracker (source of truth for what's
@@ -40,5 +42,5 @@ spec, phase-by-phase progress checklist, and design decisions with rationale.
 - An [OpenElectricity API key](https://platform.openelectricity.org.au/) (only needed
   for the incremental/recent-data path — historical backfill uses an unauthenticated
   bulk source)
-- Databricks CLI ≥ 1.3.0, authenticated via a Personal Access Token (OAuth isn't
+- Databricks CLI ≥ 1.23.0, authenticated via a Personal Access Token (OAuth isn't
   supported on Free Edition)

@@ -17,6 +17,7 @@ lands — this is the source of truth for progress, not the CLAUDE.md next-steps
 | 5 — Dashboard | ⬜ Deferred | Build in UI first, `bundle generate` after |
 | 6 — Genie | 🔄 In progress | Plan of record: `docs/genie-spec.md`. G0/G1/G3/G4 done (2026-08-30): baseline **5/20 (25%)** → curated **10/20 (50%)**, exactly doubled. G2 (metric views, optional/cuttable) skipped for now. |
 | 7 — Web delivery | ✅ done | Four-way Genie UI comparison, all live against this workspace (2026-09-02): standalone site (`web/`, chat + Preview agent mode with follow-ups), a Databricks App (`app/`, AppKit `GenieChat` + a custom `useGenieChat` tab), and the official iframe embed, tied together by a Compare tab. Details: `web/README.md`. |
+| 8 — Lakebase synced tables | ✅ Done (re-sync freshness still to confirm) | Two gold marts → Lakebase as SNAPSHOT synced tables, live on Free Edition (2026-10-31): both online, counts match, terminal script and Lakebase UI SQL-editor lookup both work. Not demonstrated: last sync time advancing (L6) — see Phase 8. |
 
 ## Context
 
@@ -144,7 +145,7 @@ lives in the Databricks `openelec` secret scope, populated once from 1Password.
 **Deliverable:** a bundle that validates and deploys, and a catalog to write into.
 
 - [x] `databricks.yml`: `bundle.name: openelec`, `bundle.engine: direct`,
-      `databricks_cli_version: '>=1.3.0'`, `include: [resources/*.yml]`, single `dev`
+      `databricks_cli_version` (originally `'>=1.3.0'`, raised to `'>=1.23.0'` in Phase 8), `include: [resources/*.yml]`, single `dev`
       target with `mode: development`.
   - **`engine: direct` is not optional** — it avoids the `releases.hashicorp.com`
     Terraform download (blocked on Free Edition, and the exact failure already hit in
@@ -546,6 +547,186 @@ clean end to end; deployed App confirmed `RUNNING` and redirecting to login when
 `getSpaceInfo()` confirmed serving correct `embedUrl`/`appUrl` via a direct probe (both dev
 ports were held by an already-running, untouched instance of this same site, so verification
 avoided the live port rather than contend for it).
+
+---
+
+## Phase 8 — Lakebase synced tables — ✅ done (re-sync freshness unproven)
+
+Copy two gold marts into Lakebase (Databricks-managed Postgres) as synced tables, defined in
+the root bundle, and show them answering Postgres point lookups from a terminal script and the
+Lakebase SQL editor. Learning targets: Lakebase project/branch/endpoint, the synced-table bundle
+resource, UC-to-Postgres name mapping, primary-key and sync-mode rules, Postgres auth with
+short-lived OAuth credentials. Runbook and demo script: [`lakebase/README.md`](lakebase/README.md).
+
+**Decisions**
+
+- **Tables:** `openelec.gold.dim_facility` (PK `facility_code`, 545 rows) and
+  `openelec.gold.facility_capacity_factor` (PK `facility_code, nem_date`, 117,087 rows at 2026-10-31, 116,695 synced), synced to
+  `openelec.serving.*` → Postgres `serving.*` in database `databricks_postgres`. A separate UC
+  schema `openelec.serving` is needed (added to `setup.sql`, same reasoning as the other schemas).
+- **SNAPSHOT only.** TRIGGERED/CONTINUOUS need a change data feed on the source; materialized
+  views don't support one and every gold mart is a pipeline MV. Re-sync is manual ("Sync now" or
+  `pipelines start-update`). No change to `pipelines/`.
+- **Synced tables are bundle-managed** (`resources/lakebase.yml`, `postgres_synced_tables`); the
+  **Lakebase project is not**: Free Edition allows one project per account and `bundle destroy`
+  would delete a bundled one. The bundle only references the branch via `var.lakebase_branch`
+  (default `projects/openelec/branches/production`; override with `--var lakebase_branch=...` if
+  the existing project has another ID).
+- **One sync pipeline per synced table** (each has its own `new_pipeline_spec`), deployed in two
+  passes so the sync pipelines never run together. The original plan was one shared pipeline
+  (`existing_pipeline_id` pointing at the first table); that interpolation does not work (see the
+  2026-10-31 Findings).
+- **Beta resource, CLI version:** `postgres_synced_tables` was validated against CLI 1.23.0
+  (offline `databricks bundle schema` check); it is Beta and may change. `databricks_cli_version`
+  in `databricks.yml` is now `>=1.23.0`, so anyone deploying needs 1.23.0+.
+- **Terminal demo:** `tools/lakebase_query.py` (PEP 723, `uv run`, `psycopg`), credentials via the
+  CLI (`generate-database-credential`, ~1h token). No local `psql`.
+- **Out of scope:** `sync_lakebase` job task, `app/`/`web/` changes, a warehouse-vs-Lakebase
+  benchmark, TRIGGERED/CONTINUOUS sync, bundling the project/branches/roles.
+
+**Offline (done in the repo, nothing run against the workspace)**
+
+- [x] `databricks.yml` variable `lakebase_branch`.
+- [x] `resources/lakebase.yml`: two `postgres_synced_tables`, SNAPSHOT.
+- [x] `setup.sql`: `CREATE SCHEMA IF NOT EXISTS openelec.serving`.
+- [x] `lakebase/checks.sql`: PK pre-check, counts, types, demo lookups, `EXPLAIN`.
+- [x] `tools/lakebase_query.py`: `--help` / `--print-sql` work with no network or psycopg.
+- [x] `lakebase/README.md`, SPEC/CLAUDE/README updates.
+
+**Live (needs auth; run in order, stop at each gate)**
+
+- [x] **L1.** `dbx postgres list-projects`: Lakebase enabled; reuse an existing project (set
+      `--var lakebase_branch=...`) or create `openelec`. If not enabled, record it here and stop.
+- [x] **L2.** Run the `openelec.serving` line of `setup.sql`, then `lakebase/checks.sql` block A.
+      **Stop on any duplicate or NULL key.**
+- [x] **L3.** With `openelec` pipeline/job idle and only `serving_dim_facility` defined:
+      `bundle validate --strict`; `bundle summary` shows **no** `dev_<user>_` prefix on
+      `synced_table_id`; `bundle deploy`; `postgres get-synced-table` until online.
+- [x] **L4.** Add `serving_facility_capacity_factor`, deploy. The `pipeline_id` interpolation failed
+      (see Findings), so the table got its own `new_pipeline_spec` and was deployed in a separate
+      pass; recorded how the sync pipelines coexist with the `openelec` pipeline (all three created
+      and idle together; concurrent runs untested).
+- [x] **L5.** Postgres vs warehouse row counts match (minus NULL-key rows), `information_schema`
+      types as expected, `uv run tools/lakebase_query.py --project openelec` ran end to end, and the
+      same lookup returned 1 row in the Lakebase UI SQL editor (human, plan criterion 16, done
+      2026-10-31).
+- [ ] **L6.** Optional: after the next `openelec` refresh, "Sync now"; last sync time advances. The
+      re-sync was triggered (`pipelines start-update`, COMPLETED in ~46 s) but `last_sync.sync_end_time`
+      did not advance and the event log shows no data movement, so freshness is **unproven** (see
+      Findings). Needs a real `openelec` refresh first (costs quota; not done).
+- [x] **L7.** Findings recorded below; Status row set to ✅ with the one remaining caveat (L6
+      freshness). Endpoint left on scale-to-zero (24h suspend timeout).
+
+**Findings** (Free Edition availability of synced tables, row counts, query/connect timings,
+dev-mode prefixing, `pipeline_id` interpolation result, pipeline-cap behaviour. Teardown behaviour of
+the Postgres table was not tested.)
+
+L1 to L5 and L7 done 2026-10-31 (including the Lakebase UI SQL-editor lookup, criterion 16); L6 ran
+but freshness is unproven. Outstanding: a re-sync after a real `openelec` refresh.
+
+- **2026-10-31, Lakebase is available on Free Edition.** `dbx postgres list-projects` initially
+  returned `[]` (enabled, no project yet). Whether *synced tables* work on Free Edition is still
+  unproven until L3.
+- **2026-10-31, project, branch, endpoint.** The human created project `openelec` (Postgres 17,
+  owned by the human) with default endpoint settings: autoscaling min = max = 1 CU,
+  `suspend_timeout_duration` 86400s, `enable_pg_native_login` false, history retention 604800s.
+  Branch `production` is READY and the default (`projects/openelec/branches/production`, matching
+  the `lakebase_branch` default, so no `--var` override is needed). Endpoint `primary` is
+  `ENDPOINT_TYPE_READ_WRITE` and ACTIVE.
+- **2026-10-31, the suspend timeout is 24 hours.** The endpoint scales to zero only after 24h idle,
+  so the scale-from-zero wake-up (visible in `connect:` of `tools/lakebase_query.py`) only shows
+  after a day without connections; a demo run shortly after setup will not show a cold start.
+- **2026-10-31, CLI shape.** `dbx postgres list-endpoints` returns a bare JSON array (like
+  `list-projects`), and each element is the full endpoint object including `status.hosts.host`, so a
+  separate `get-endpoint` call is redundant.
+- **2026-10-31, schema.** `CREATE SCHEMA IF NOT EXISTS openelec.serving` succeeded on the warehouse.
+- **2026-10-31, PK pre-check A1 (`dim_facility`, key `facility_code`):** 0 duplicate or NULL keys;
+  source count 545.
+- **2026-10-31, PK pre-check A2 (`facility_capacity_factor`, key `facility_code, nem_date`):** 0
+  duplicates among non-NULL codes, but **392 rows have `facility_code` NULL**: one row per date
+  across 392 distinct dates, with `facility_name`, `network_region` and the capacity columns all
+  NULL and `energy_mwh` populated and large. This is an unattributed per-date bucket produced by the
+  left join in the gold mart, not a real facility. Source count 117,087.
+- **2026-10-31, decision: accept the drop.** Synced-table PK columns are NOT NULL and NULL-key rows
+  are silently dropped, so the sync will not fail, but the Postgres copy is expected to hold
+  117,087 - 392 = **116,695** rows (not 117,087). No gold change (out of scope); documented in
+  `lakebase/README.md` and `lakebase/checks.sql`. The count will drift as data grows: the rule is
+  "source count minus the NULL-key rows reported by `checks.sql` B1". `dim_facility` expects 0
+  dropped (545 rows). The earlier "~109k rows" figure for `facility_capacity_factor` was stale and is corrected in
+  Decisions.
+- **2026-10-31, L3: synced tables ARE supported on Free Edition.** With only `serving_dim_facility`
+  defined and the `openelec` pipeline and job idle: `bundle validate --strict` passed; `bundle
+  summary` showed the synced-table IDs with **no** dev-mode prefix (only the pipeline, job and Genie
+  space carry `[dev drewtechau]`), so the Postgres schema/table is `serving.dim_facility`; `bundle
+  plan` showed 1 to add / 3 unchanged; `bundle deploy` created the table. It went
+  `SYNCED_TABLE_PROVISIONING_PIPELINE_RESOURCES` -> `SYNCED_TABLE_ONLINE_NO_PENDING_UPDATE` in about
+  48 seconds, with no long serverless cold start.
+- **2026-10-31, L4: `existing_pipeline_id` interpolation does not work.**
+  `existing_pipeline_id: ${resources.postgres_synced_tables.serving_dim_facility.pipeline_id}` makes
+  `bundle plan` fail with `cannot resolve "...serving_dim_facility.pipeline_id": schema mismatch:
+  field "pipeline_id" not found in resources.PostgresSyncedTableConfig /
+  dresources.PostgresSyncedTableRemote` (CLI 1.23.0, direct engine). The `pipeline_id` exists on the
+  remote `get-synced-table` status but is not interpolatable, so the schema-level hint in
+  `existing_pipeline_id`'s description did not hold. Fallback applied: each table has its own
+  `new_pipeline_spec` (one sync pipeline per synced table), deployed in two passes (`dim_facility`
+  first, then `facility_capacity_factor`) so the sync pipelines never run together. The second table
+  deployed this way (next entry).
+- **2026-10-31, L4: second table deployed, three pipelines coexist idle.** With the per-table
+  `new_pipeline_spec` in a separate pass, `bundle plan` showed 1 to add / 4 unchanged
+  (`dim_facility` untouched) and `bundle deploy` created it. The deploy was **not blocked** even
+  though the `openelec` pipeline and the first sync pipeline already existed (all idle). State went
+  `PROVISIONING_PIPELINE_RESOURCES` -> `PROVISIONING_INITIAL_SNAPSHOT` (synced_row_count 116,695 of
+  116,695) -> `ONLINE_NO_PENDING_UPDATE` in about 70 seconds from creation.
+- **2026-10-31, pipeline cap.** Three pipelines now coexist on Free Edition (the `openelec` LDP plus
+  one sync pipeline per synced table), all idle after their runs; creating them did not hit the "one
+  active pipeline per type" cap. Running two of them concurrently was deliberately never tried, so
+  whether that is blocked is **still unknown** (the two-pass deploy and manual re-sync keep them from
+  running together).
+- **2026-10-31, L5: counts and types.** Postgres `dim_facility` 545 = warehouse 545. Postgres
+  `facility_capacity_factor` 116,695 = warehouse 117,087 minus the 392 NULL-key rows, as predicted.
+  Types: `ARRAY<STRING>` -> `jsonb` (`fueltech_groups`), `DATE` -> `date`, `DOUBLE` -> `double
+  precision`, `BIGINT` -> `bigint`, boolean -> `boolean`, `STRING` -> `text`. Primary-key columns
+  (`facility_code`; `facility_code` + `nem_date`) are NOT NULL, the others nullable. `EXPLAIN` of a
+  `facility_code` lookup uses an index scan on the primary-key index of a partition: synced tables
+  are stored partitioned, with a `__db_tmp_..._pkey` index name (the sync swaps in a staged copy).
+- **2026-10-31, L5: terminal script.** `uv run tools/lakebase_query.py --project openelec` ran end
+  to end with no code changes: `dim_facility` lookup (TUMUT3), 7-day `capacity_factor`, and the
+  `jsonb` array-contains query (`battery_discharging`; 10 rows shown, `LIMIT 10`). Connect took 1.3 s
+  (not a cold start; the endpoint was already active). Each query took about 210 ms, but a bare
+  `SELECT 1` also takes about 217 ms, so the per-query time is almost entirely the client-to-endpoint
+  network round trip (client in Australia, endpoint in us-east-2), **not** server execution time. Do
+  not compare these numbers with warehouse latency without accounting for that; `EXPLAIN (ANALYZE)`
+  gives the server-side time. The CLI response shapes the script assumed all worked
+  (`list-endpoints` host at `status.hosts.host`, `generate-database-credential` `token`,
+  `current-user me` `userName`), so those are now verified. Still **unverified**: the
+  `{"spec": ...}` body in the README's `create-synced-table` CLI fallback (never used).
+- **2026-10-31, source data staleness.** The latest date in gold is 2026-09-03: source-data
+  staleness, unrelated to Lakebase.
+- **2026-10-31, L6: re-sync ran, freshness unproven.** `dbx pipelines start-update <sync pipeline
+  id>` on the `dim_facility` sync pipeline worked (WAITING_FOR_RESOURCES -> COMPLETED in about 46 s).
+  But `last_sync.sync_end_time` did not advance (still the original sync time) and the event log
+  shows no data-movement events. Likely, but **unproven**, because the source MV had no new commit
+  since the first sync. So "last sync time moves forward" (plan criterion 17) is not demonstrated;
+  it needs a real `openelec` refresh first (costs quota; not done).
+- **2026-10-31, UI SQL-editor check done (criterion 16).** The human ran `SELECT * FROM
+  serving.dim_facility WHERE facility_code = 'TUMUT3'` in the Lakebase UI SQL editor: 1 row, editor
+  showed 239 ms. That figure is network round trip, not database time (see the timing finding
+  below). Criteria 9 (`validate --strict`) and 10 (no
+  dev-mode prefix) passed live earlier; the bundle engine is `direct`.
+- **2026-10-31, server-side vs client timing.** Measured with `EXPLAIN (ANALYZE, BUFFERS)` over a
+  live connection, against the client round trip from the dev machine (Australia) to the us-east-2
+  endpoint. The ~210 ms per query in the script and the 239 ms in the UI editor are network round
+  trip; the database itself answers in well under a millisecond.
+
+  | Measurement | Result |
+  |---|---|
+  | `dim_facility` PK lookup, server Execution Time | 0.04 to 0.2 ms (index scan on the PK index of a partition) |
+  | `facility_capacity_factor` last-7-days query, server Execution Time | 0.08 ms |
+  | Client round trip, `SELECT 1` x10, Australia to us-east-2 | min 212 / median 213 / max 426 ms |
+  | Script, per query (L5) | ~210 ms |
+  | Lakebase UI SQL editor, `dim_facility` lookup | 239 ms |
+
+  Demo tip: after Run in the SQL editor, click "Explain (Analyze)" to show the execution time.
 
 ---
 

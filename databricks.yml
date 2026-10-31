@@ -6,7 +6,7 @@ bundle:
   # required for Genie space resources later. Start on direct rather than
   # migrating an existing Terraform-state bundle onto it.
   engine: direct
-  databricks_cli_version: '>=1.3.0'
+  databricks_cli_version: '>=1.23.0'
 
 include:
   - resources/*.yml
@@ -20,6 +20,14 @@ variables:
       SQL warehouse backing the Genie space (Free Edition: one shared 2X-Small).
       Found via `dbx warehouses list` — see docs/genie-spec.md G0.
     default: 5e6a78f2a3683e91
+  lakebase_branch:
+    description: >-
+      Lakebase branch that holds the synced tables (resources/lakebase.yml), as
+      `projects/<project_id>/branches/<branch_id>`. The project itself is created once
+      outside the bundle; if yours has a different ID, override with
+      `--var lakebase_branch=projects/<id>/branches/<branch>`.
+      See lakebase/README.md.
+    default: projects/openelec/branches/production
 
 targets:
   dev:
