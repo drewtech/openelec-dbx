@@ -728,6 +728,9 @@ but freshness is unproven. Outstanding: a re-sync after a real `openelec` refres
 
   Demo tip: after Run in the SQL editor, click "Explain (Analyze)" to show the execution time.
 
+- 2026-10-31: workspace-specific IDs (warehouse, Genie space) scrubbed from the repo and
+  history. Bundles now read them from `BUNDLE_VAR_*` in a gitignored `.env` (see `.env.example`).
+
 ---
 
 ## Deferred

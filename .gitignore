@@ -11,6 +11,10 @@ __pycache__/
 
 # Secrets (should never exist here — env vars or a secrets manager only — but belt and braces)
 .env
+.env.*
+*.env.1password
+.env.1password
+!.env.example
 
 # Web demo (web/) — Node
 node_modules/

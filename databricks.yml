@@ -18,8 +18,8 @@ variables:
   warehouse_id:
     description: >-
       SQL warehouse backing the Genie space (Free Edition: one shared 2X-Small).
-      Found via `dbx warehouses list` — see docs/genie-spec.md G0.
-    default: <warehouse-id>
+      No default: supplied via `BUNDLE_VAR_warehouse_id` from a gitignored `.env`
+      (see `.env.example`). Find it with `dbx warehouses list`.
   lakebase_branch:
     description: >-
       Lakebase branch that holds the synced tables (resources/lakebase.yml), as

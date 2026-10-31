@@ -35,8 +35,6 @@ targets:
     # DATABRICKS_HOST env var you deploy with, so this bundle isn't pinned to one workspace.
 
     variables:
-      # This project's own deployed values — replace for a different workspace, or override
-      # per-deploy without editing this file: BUNDLE_VAR_genie_space_id=<id>
-      # BUNDLE_VAR_genie_space_name=<name> databricks bundle deploy
-      genie_space_id: <genie-space-id>
+      # genie_space_id has no default: it comes from BUNDLE_VAR_genie_space_id
+      # (see the root .env.example). Override the name the same way if needed.
       genie_space_name: OpenElectricity NEM
