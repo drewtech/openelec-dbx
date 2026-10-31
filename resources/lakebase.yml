@@ -1,0 +1,49 @@
+# Lakebase demo 1: copy two gold marts into Lakebase (managed Postgres) as synced
+# tables, so they answer Postgres point lookups. See lakebase/README.md.
+#
+# - SNAPSHOT only: TRIGGERED/CONTINUOUS need a change data feed on the source, and
+#   materialized views (every gold mart is one) don't support it. Re-sync is manual
+#   ("Sync now" in Catalog Explorer, or `dbx pipelines start-update <sync pipeline id>`).
+# - A synced table's definition can't be changed in place: any edit here deletes and
+#   recreates it, with a full re-snapshot. Harmless at ~110k rows, but expect it.
+# - The Lakebase project/branch is deliberately NOT a bundle resource: Free Edition
+#   allows one project per account, and `bundle destroy` would delete a bundled one.
+#   It is created once (UI or `dbx postgres create-project`) and referenced by
+#   ${var.lakebase_branch}.
+# - The UC schema `serving` holds the synced-table entries; it is created in setup.sql
+#   (not here) for the same reason as the other schemas. Unity Catalog name
+#   catalog.schema.table maps to Postgres schema.table, so `openelec.serving.dim_facility`
+#   becomes `serving.dim_facility` in database `databricks_postgres`.
+# - Primary-key columns become NOT NULL in Postgres, NULL-key rows are silently dropped
+#   and duplicate keys fail the sync -- run the pre-check in lakebase/checks.sql first.
+# - `postgres_synced_tables` is Beta; validated against CLI 1.23.0 (offline `bundle schema`);
+#   the bundle requires CLI >=1.23.0.
+resources:
+  postgres_synced_tables:
+    serving_dim_facility:
+      synced_table_id: ${var.catalog}.serving.dim_facility
+      source_table_full_name: ${var.catalog}.gold.dim_facility
+      primary_key_columns: [facility_code]
+      scheduling_policy: SNAPSHOT
+      branch: ${var.lakebase_branch}
+      postgres_database: databricks_postgres
+      create_database_objects_if_missing: true
+      # Each synced table gets its own sync pipeline (it keeps its checkpoints/event log in
+      # this schema): `existing_pipeline_id` can't point at another table's pipeline because
+      # `pipeline_id` is not interpolatable, see lakebase/README.md ("Deploy"). Deploy the
+      # two tables in separate passes so the sync pipelines never run together.
+      new_pipeline_spec:
+        storage_catalog: ${var.catalog}
+        storage_schema: serving
+
+    serving_facility_capacity_factor:
+      synced_table_id: ${var.catalog}.serving.facility_capacity_factor
+      source_table_full_name: ${var.catalog}.gold.facility_capacity_factor
+      primary_key_columns: [facility_code, nem_date]
+      scheduling_policy: SNAPSHOT
+      branch: ${var.lakebase_branch}
+      postgres_database: databricks_postgres
+      create_database_objects_if_missing: true
+      new_pipeline_spec:
+        storage_catalog: ${var.catalog}
+        storage_schema: serving
