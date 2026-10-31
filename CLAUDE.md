@@ -49,6 +49,9 @@ as edge cases:
 
 - One SQL warehouse, capped at 2X-Small.
 - One active Lakeflow Declarative Pipeline per pipeline type.
+- One Lakebase (managed Postgres) project per account, with scale-to-zero compute. Synced tables
+  run as a managed serverless pipeline each; three pipelines (`openelec` + two sync pipelines)
+  coexisted idle without hitting the cap above, concurrent runs untested (SPEC.md Phase 8).
 - Max 5 concurrent job tasks per account.
 - No custom/classic compute clusters.
 - Exceeding the fair-usage quota shuts the workspace down for the rest of the day
@@ -69,6 +72,8 @@ as edge cases:
   (Conversation API chat mode + Preview agent mode). Its own bundle-free npm project.
 - `app/` — the same Genie space as a Databricks App (AppKit `genie()` + `GenieChat`), its own
   bundle (`app/databricks.yml`), deployed separately from the root `databricks.yml`.
+- `lakebase/` — Lakebase demo 1: runbook, `checks.sql`, and demo script for the synced tables
+  defined in `resources/lakebase.yml` (queried with `tools/lakebase_query.py`).
 - Secrets (API keys, workspace tokens) via env vars or Databricks secret scopes
   only — never committed. Add a `.env.example` alongside any script that needs one.
 - Databricks CLI auth: this repo has no dependency on any one method — a CLI profile

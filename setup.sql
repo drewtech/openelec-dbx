@@ -23,3 +23,6 @@ CREATE SCHEMA IF NOT EXISTS openelec.gold
 
 CREATE VOLUME IF NOT EXISTS openelec.bronze.raw
   COMMENT 'Landing zone for verbatim ingestion JSON before Auto Loader picks it up.';
+
+CREATE SCHEMA IF NOT EXISTS openelec.serving
+  COMMENT 'Lakebase synced-table entries (read-only Postgres copies of gold marts). Managed by resources/lakebase.yml.';
